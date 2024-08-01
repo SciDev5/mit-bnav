@@ -1,95 +1,97 @@
+'use client';
+
 import Image from "next/image";
 import styles from "./page.module.css";
+import { useEffect, useRef, useState } from "react";
+import { APath, DPath, Font, load_svg, Vec2 } from "@/sys/svg";
+
+const r: Record<string, any> = {}
+const remaining = new Set("qwertyuiopasdfghjklzxcvbnm1234567890/")
 
 export default function Home() {
-  return (
-    <main className={styles.main}>
-      <div className={styles.description}>
-        <p>
-          Get started by editing&nbsp;
-          <code className={styles.code}>src/app/page.tsx</code>
-        </p>
-        <div>
-          <a
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className={styles.vercelLogo}
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
+    const [p, set_p] = useState<DPath[]>([])
+    const [q, set_q] = useState<DPath[]>([])
+    const [sel_i, set_sel_i] = useState(0)
+    const [sel_q, set_sel_q] = useState(0)
 
-      <div className={styles.center}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
+    useEffect(() => {
+        const l = Font.DEFAULT.find_letters(p.flatMap(v => APath.from_d(v)), 0.1)
+        const w = Font.DEFAULT.wordify(l, 0.1)
+        console.log(l, w);
+        // set_q(l.map(({ ch, bb }) => DPath.parse(`m ${bb.pos.x} ${bb.pos.y} h ${bb.dim.x} v ${bb.dim.y} h -${bb.dim.x} z`, {}, "LETTER " + ch)))
+        set_q(w.map(({ str, bb }) => DPath.parse(`m ${bb.pos.x} ${bb.pos.y} h ${bb.dim.x} v ${bb.dim.y} h -${bb.dim.x} z`, {}, "LETTER " + str.map(v => v.ch).join(""))))
+    }, [p])
 
-      <div className={styles.grid}>
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Docs <span>-&gt;</span>
-          </h2>
-          <p>Find in-depth information about Next.js features and API.</p>
-        </a>
+    return (
+        <>
+            <input type={"file"} onChange={async e => {
+                const d = await (e.currentTarget.files ?? [])[0]?.text()
+                if (d == null) {
+                    return
+                }
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Learn <span>-&gt;</span>
-          </h2>
-          <p>Learn about Next.js in an interactive course with&nbsp;quizzes!</p>
-        </a>
+                const svg = load_svg(d)
+                if (svg == null) {
+                    return
+                }
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Templates <span>-&gt;</span>
-          </h2>
-          <p>Explore starter templates for Next.js.</p>
-        </a>
+                const z = svg.querySelectorAll("path")
+                const s = [...z].map(v => DPath.parse(v.getAttribute("d")!, { filled: v.style.fill != "none" }, v.id))
+                // s.forEach(v => v.scale(new Vec2(0.1, -0.1)).offset(new Vec2(0, 700)))
+                s.forEach(v => v.scale(new Vec2(0.1, 0.1)))
 
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Deploy <span>-&gt;</span>
-          </h2>
-          <p>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
-  );
+                set_p(s)
+
+            }} />
+            <button onClick={() => {
+                p.forEach(v => v.swap_xy())
+                set_p([...p])
+            }}>flip_xy</button>
+            <button onClick={() => {
+                p.forEach(v => v.scale(new Vec2(1, -1)).offset(new Vec2(0, 700)))
+                set_p([...p])
+            }}>flip_y</button>
+            <button onClick={() => {
+                p.forEach(v => v.scale(new Vec2(-1, 1)).offset(new Vec2(700, 0)))
+                set_p([...p])
+            }}>flip_x</button>
+            <button onClick={() => {
+                p.splice(sel_i, sel_q)
+                set_p([...p])
+            }}>delete</button>
+            <button onClick={() => {
+                const gen = APath.conormalize(p.slice(sel_i, sel_i + sel_q).flatMap(v => APath.from_d(v))).map(v => [v.points.map(({ x, y }) => [x, y]), v.loop])
+                const ch = prompt("what letter")
+                if (ch == null) {
+                    return
+                }
+                remaining.delete(ch)
+
+                r[ch] = gen
+                console.log(remaining);
+                console.log(ch, gen);
+            }}>export</button>
+            <button onClick={() => { console.log(r) }}>all exports</button>
+            <input value={sel_q} type="number" min={0} max={p.length} step={1} onChange={e => { set_sel_q(e.currentTarget.valueAsNumber) }} />
+            <svg width={"10000"} height={"10000"} style={{ background: "#000" }} >
+                {
+                    [...p, ...q].map((v, i) => {
+                        const color = i >= sel_i && i - sel_i < sel_q ? "#0f0" : "#fff"
+
+                        return (
+                            <path
+                                d={v.stringify()}
+                                strokeWidth={0.5}
+                                className={v.id}
+                                stroke={v.style.filled ?? false ? "transparent" : color}
+                                fill={v.style.filled ?? false ? color : "transparent"}
+                                key={i}
+                                onClick={() => set_sel_i(i)}
+                            />
+                        )
+                    })
+                }
+            </svg>
+        </>
+    );
 }
