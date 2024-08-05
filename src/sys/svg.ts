@@ -1,5 +1,4 @@
-
-export function load_svg(svg_src: string): SVGSVGElement | null {
+function load_svg_elt(svg_src: string): SVGSVGElement | null {
     const contain = document.createElement("div")
     contain.innerHTML = svg_src
     const children = [...contain.children]
@@ -14,20 +13,57 @@ export function load_svg(svg_src: string): SVGSVGElement | null {
     }
 }
 
-export interface DCommand {
+function svg_elt_to_dpaths(svg: SVGElement): DPath[] {
+    if (svg instanceof SVGGElement) {
+        return svg_gelt_to_dpaths(svg)
+    } else if (svg instanceof SVGPathElement) {
+        return [svg_pathelt_to_dpaths(svg)]
+    } else {
+        return []
+    }
+}
+function svg_gelt_to_dpaths(svg: SVGGElement): DPath[] {
+    const paths = [...svg.children].flatMap(child_svg => child_svg instanceof SVGElement ? svg_elt_to_dpaths(child_svg) : [])
+
+    const transform = svg.transform.baseVal.consolidate()?.matrix
+    if (transform != null) {
+        // if (!transform.is2D) console.warn("non 2d transform")
+        if ((transform.a != 0 || transform.d != 0) && (transform.b != 0 || transform.c != 0)) console.warn("skew transform disallowed, skipped")
+        const [flip_xy, scale] = (transform.a != 0 || transform.d != 0)
+            ? [false, new Vec2(transform.a, transform.d)]
+            : [true, new Vec2(transform.b, transform.c)]
+        const offset = new Vec2(transform.e, transform.f)
+
+        paths.forEach(path => {
+            if (flip_xy) path.swap_xy()
+            path.scale(scale)
+            path.offset(offset)
+        })
+    }
+
+    return paths
+}
+function svg_svgelt_to_dpaths(svg: SVGSVGElement): DPath[] {
+    return [...svg.children].flatMap(child_svg => child_svg instanceof SVGElement ? svg_elt_to_dpaths(child_svg) : [])
+}
+function svg_pathelt_to_dpaths(svg: SVGPathElement): DPath {
+    return DPath.parse(svg.getAttribute("d")!, { filled: svg.style.fill != "none" })
+}
+
+interface DCommand {
     relative: boolean
     scale(v: Vec2): void
     offset(v: Vec2): void
     swap_xy(): void
     stringify(): string
-    as_vec(): Vec2
+    as_vec(prev: Vec2): Vec2
 }
 
-export enum AxisDirection {
+enum AxisDirection {
     Horizontal,
     Vertical,
 }
-export class DCommandAxisLine implements DCommand {
+class DCommandAxisLine implements DCommand {
     constructor(
         public relative: boolean,
         public direction: AxisDirection,
@@ -70,16 +106,16 @@ export class DCommandAxisLine implements DCommand {
                 { [AxisDirection.Horizontal]: "H", [AxisDirection.Vertical]: "V" }
         )[this.direction]} ${this.x}`
     }
-    as_vec(): Vec2 {
+    as_vec(prev: Vec2): Vec2 {
         switch (this.direction) {
             case AxisDirection.Horizontal:
-                return new Vec2(this.x, 0)
+                return new Vec2(this.x, this.relative ? 0 : prev.y)
             case AxisDirection.Vertical:
-                return new Vec2(0, this.x)
+                return new Vec2(this.relative ? 0 : prev.x, this.x)
         }
     }
 }
-export class DCommandLine implements DCommand {
+class DCommandLine implements DCommand {
     constructor(
         public relative: boolean,
         public jump: boolean,
@@ -99,11 +135,11 @@ export class DCommandLine implements DCommand {
             ? (this.jump ? "m" : "l")
             : (this.jump ? "M" : "L")} ${this.v.x} ${this.v.y}`
     }
-    as_vec(): Vec2 {
+    as_vec(prev: Vec2): Vec2 {
         return this.v
     }
 }
-export class DCommandClose implements DCommand {
+class DCommandClose implements DCommand {
     constructor(
         public relative: boolean,
     ) { }
@@ -113,27 +149,26 @@ export class DCommandClose implements DCommand {
     stringify(): string {
         return this.relative ? "z" : "Z" // kinda irrelevant but ill keep it in for gits and shiggles
     }
-    as_vec(): Vec2 {
+    as_vec(_prev: Vec2): Vec2 {
         return new Vec2(0, 0)
     }
 }
 
-export interface DPathStyle {
+interface DPathStyle {
     filled?: boolean,
     // color: string,
     // secondary
 }
 
-export class DPath {
+class DPath {
     private constructor(
         public path: DCommand[],
         public style: DPathStyle,
         public id: string,
+        public src: string,
     ) { }
 
     static parse(d: string, style: DPathStyle = {}, id: string = "-"): DPath {
-        // console.log(d);
-
         return new DPath([
             ...d.replaceAll(/,/g, " ").replaceAll(/\s+/g, " ").matchAll(/\s*([a-z])((?: -?\d+(?:\.\d*)?)*)|(.+?)/gi)
         ].flatMap(([v, cmd, args_str, match_fail]): DCommand[] => {
@@ -165,7 +200,7 @@ export class DPath {
             }
             console.warn(`DPath.parse unrecognized command '${cmd.toLowerCase}'`);
             return []
-        }), style, id)
+        }), style, id, d)
     }
     stringify(): string {
         // return this.path[0].stringify() + "h 1 v 1 h -1 v -1" + this.path.slice(1).map(cmd => cmd.stringify()).join(" ") + " h 1 v 1 h -1 v -1"
@@ -227,6 +262,19 @@ export class Vec2 {
     copy() {
         return new Vec2(this.x, this.y)
     }
+    normalized() {
+        return this.times_scalar(1 / Math.sqrt(this.mag_sq()))
+    }
+    cx_times(rhs: Vec2) {
+        return new Vec2(
+            this.x * rhs.x - this.y * rhs.y,
+            this.x * rhs.y + this.y * rhs.x,
+        )
+    }
+    cx_conj() {
+        return new Vec2(this.x, -this.y)
+    }
+
 }
 export class Rect2 {
     readonly pos: Vec2
@@ -270,34 +318,45 @@ export class Rect2 {
     set h(h) { this.dim.y = h }
 }
 
-export class APath {
+export class Path {
     constructor(
         public points: Vec2[],
         public loop: boolean,
         public filled: boolean,
+        public src?: string,
     ) { }
 
-    static from_d(d: DPath): APath[] {
+    static load_paths(svg_src: string): Path[] | null {
+        const svg = load_svg_elt(svg_src)
+        if (svg == null) return null
+        return svg_svgelt_to_dpaths(svg).flatMap(d_path => Path.from_d(d_path))
+    }
+
+    static parse_dstr(d_str: string, style?: DPathStyle, id?: string): Path[] {
+        return Path.from_d(DPath.parse(d_str, style, id))
+    }
+
+    private static from_d(d: DPath): Path[] {
         let pos = new Vec2(0, 0)
 
-        const paths: APath[] = []
+        const paths: Path[] = []
         let building = null
         for (const s of d.path) {
             if ((s instanceof DCommandAxisLine) || (s instanceof DCommandLine)) {
-                const v = s.as_vec()
+                const v = s.as_vec(pos)
                 const jump = (s instanceof DCommandLine) && s.jump
                 if (jump) {
                     if (building != null) {
                         paths.push(building)
                     }
-                    building = new APath([], false, d.style.filled ?? false)
+                    building = new Path([], false, d.style.filled ?? false, d.src)
                 }
                 pos = s.relative ? pos.plus(v) : v
-                building ??= new APath([], false, d.style.filled ?? false)
+                building ??= new Path([], false, d.style.filled ?? false, d.src)
                 building.points.push(pos)
             }
             if (s instanceof DCommandClose) {
-                building ??= new APath([], false, d.style.filled ?? false)
+                building ??= new Path([], false, d.style.filled ?? false, d.src)
                 building.loop = true
             }
         }
@@ -321,22 +380,46 @@ export class APath {
             max.minus(min)
         )
     }
-    normalized(): APath {
+    rotated(rotor: Vec2): Path {
+        return new Path(
+            this.points.map(point => point.cx_times(rotor)),
+            this.loop,
+            this.filled,
+        )
+    }
+    normalized(): Path {
         const bb = this.bounding_box()
         const scale = 1 / Math.max(bb.dim.x, bb.dim.y, 1e-100)
-        return new APath(
+        return new Path(
             this.points.map(v => v.minus(bb.pos).times_scalar(scale)),
             this.loop,
             this.filled,
         )
     }
-    static conormalize(paths: APath[]) {
+    normalized_unrotated(): { path: Path, restorative_rot: Vec2 } {
+        const mean_pos = this.points.reduce((a, b) => a.plus(b)).times_scalar(1 / this.points.length)
+        const restorative_rot = this.points[0].minus(mean_pos).normalized()
+
+        const unrotated = this.rotated(restorative_rot.cx_conj())
+
+        const bb = unrotated.bounding_box()
+        const scale = 1 / Math.max(bb.dim.x, bb.dim.y, 1e-100)
+        return {
+            path: new Path(
+                unrotated.points.map(v => v.minus(bb.pos).times_scalar(scale)),
+                this.loop,
+                this.filled,
+            ),
+            restorative_rot,
+        }
+    }
+    static conormalize(paths: Path[]) {
         if (paths.length === 0) {
             return []
         }
         const bb = paths.map(p => p.bounding_box()).reduce((a, b) => a.merge(b))
         const scale = 1 / Math.max(bb.dim.x, bb.dim.y, 1e-100)
-        return paths.map(p => new APath(
+        return paths.map(p => new Path(
             p.points.map(v => v.minus(bb.pos).times_scalar(scale)),
             p.loop,
             p.filled,
@@ -348,13 +431,13 @@ export class APath {
                 .map((_, i) => v.dist_to_segment_sq(this.points[i], this.points[i + 1]))
         )
     }
-    static _dist_one_way_many(a: APath[], b: APath[]): number {
+    static _dist_one_way_many(a: Path[], b: Path[]): number {
         return Math.min(...b.flatMap(b => a.flatMap(a => a.points.map(a => b.dist_to_point(a)))))
     }
-    static _dist_one_way(a: APath, b: APath): number {
+    static _dist_one_way(a: Path, b: Path): number {
         return Math.min(...a.points.map(a => b.dist_to_point(a)))
     }
-    direct_compare(template: APath, thresh = 0.01): boolean {
+    direct_compare(template: Path, thresh = 0.01): boolean {
         if (this.points.length !== template.points.length) {
             return false
         }
@@ -371,6 +454,14 @@ export class APath {
     // static direct_compare_many(a: APath[], b: APath[], thresh = 0.01): boolean {
     //     return Math.max(APath._dist_one_way_many(a, b), APath._dist_one_way_many(b, a)) <= thresh * thresh
     // }
+
+    stringify(scale: number): string {
+        return "M " +
+            this.points
+                .map(({ x, y }) => `${x * scale} ${y * scale}`)
+                .join(" L ") +
+            (this.loop ? " z" : "")
+    }
 }
 
 enum RequireNearbyLevel {
@@ -378,24 +469,36 @@ enum RequireNearbyLevel {
     Weak,
     Strong,
 }
-type FontLetterInfo = { needs_others_nearby: number, h_rel: number, y_off: number }
-type FontMatchedLetter = { ch: string, bb: Rect2, bb_line: Rect2, i: number, n: number }
+type FontSymbolInfo = { needs_others_nearby: number, h_rel: number, y_off: number }
+type FontMatchedSymbol = { ch: string, bb: Rect2, bb_line: Rect2, i: number, n: number }
+type FontMatchedSymbolRotated = FontMatchedSymbol & { restorative_rot: Vec2 }
 
 export class Font {
-    readonly map: Map<APath[], string>
-    readonly letter_infos: Map<string, FontLetterInfo>
-    readonly check_order: { conormalized: APath[], individual: APath[] }[]
+    readonly map: Map<Path[], string>
+    readonly symbol_infos: Map<string, FontSymbolInfo>
+    readonly check_order: {
+        conormalized: Path[], individual: Path[],
+        conormalized_rot: Path[], individual_rot: Path[],
+    }[]
     constructor(
         readonly max_size: number,
-        map_in: Record<string, { paths: APath[][], info: FontLetterInfo }>,
+        map_in: Record<string, { paths: Path[][], info: FontSymbolInfo }>,
     ) {
-        this.map = new Map(Object.entries(map_in).flatMap(([char, { paths }]) => paths.map(paths => [APath.conormalize(paths), char])))
-        this.letter_infos = new Map(Object.entries(map_in).map(([char, { info }]) => [char, info]))
-        this.check_order = [...this.map.keys()].sort((a, b) => b.length - a.length).map(v => ({ conormalized: v, individual: v.map(v => v.normalized()) }))
+        this.map = new Map(Object.entries(map_in).flatMap(([char, { paths }]) => paths.map(paths => [Path.conormalize(paths), char])))
+        this.symbol_infos = new Map(Object.entries(map_in).map(([char, { info }]) => [char, info]))
+        this.check_order = [...this.map.keys()].sort((a, b) => b.length - a.length).map(v => {
+            const rotation = v[0].normalized_unrotated().restorative_rot.cx_conj()
+            return {
+                conormalized: v,
+                individual: v.map(v => v.normalized()),
+                conormalized_rot: Path.conormalize(v.map(v => v.rotated(rotation))),
+                individual_rot: v.map(v => v.rotated(rotation).normalized()),
+            }
+        })
     }
 
-    find_letters(s: APath[], thresh = 0.01): FontMatchedLetter[] {
-        const letters: FontMatchedLetter[] = []
+    find_symbols(s: Path[], thresh = 0.01): FontMatchedSymbol[] {
+        const letters: FontMatchedSymbol[] = []
         const s_norm_ind = s.map(v => v.normalized())
 
         for (let i = 0; i < s.length; i++) {
@@ -404,12 +507,12 @@ export class Font {
                 const n = t_norm_co.length
                 if (n > n_max) continue
                 if (!s_norm_ind[i].direct_compare(t_norm_ind[0], thresh)) continue
-                const s_norm_co = APath.conormalize(s.slice(i, i + n))
+                const s_norm_co = Path.conormalize(s.slice(i, i + n))
                 if (!s_norm_co.every((_, j) => s_norm_co[j].direct_compare(t_norm_co[j], thresh))) continue
                 // if (!APath.direct_compare_many(s_norm_co, t_norm_co, thresh)) continue
 
                 const ch = this.map.get(t_norm_co)!
-                const ch_info = this.letter_infos.get(ch)!
+                const ch_info = this.symbol_infos.get(ch)!
                 const bb = s.slice(i, i + n).map(s => s.bounding_box()).reduce((a, b) => a.merge(b))
                 const h = bb.h / ch_info.h_rel
                 const bb_line = new Rect2(new Vec2(bb.x, bb.y + h * ch_info.y_off), new Vec2(bb.h, h))
@@ -423,9 +526,39 @@ export class Font {
         return letters
     }
 
-    wordify(letters_in: FontMatchedLetter[], thresh: number = 0.01): { str: FontMatchedLetter[], bb: Rect2 }[] {
+    find_symbols_rotated(s: Path[], thresh = 0.01): FontMatchedSymbolRotated[] {
+        const letters: FontMatchedSymbolRotated[] = []
+        const s_norm_ind = s.map(v => v.normalized_unrotated())
+
+        for (let i = 0; i < s.length; i++) {
+            const n_max = s.length - i
+            for (const { conormalized: t_norm_co, individual: t_norm_ind } of this.check_order) {
+                const n = t_norm_co.length
+                if (n > n_max) continue
+                if (!s_norm_ind[i].path.direct_compare(t_norm_ind[0], thresh)) continue
+                const { restorative_rot } = s_norm_ind[i]
+                const s_norm_co = Path.conormalize(s.slice(i, i + n).map(v => v.rotated(restorative_rot.cx_conj())))
+                if (!s_norm_co.every((_, j) => s_norm_co[j].direct_compare(t_norm_co[j], thresh))) continue
+                // if (!APath.direct_compare_many(s_norm_co, t_norm_co, thresh)) continue
+
+                const ch = this.map.get(t_norm_co)!
+                const ch_info = this.symbol_infos.get(ch)!
+                const bb = s.slice(i, i + n).map(s => s.bounding_box()).reduce((a, b) => a.merge(b))
+                const h = bb.h / ch_info.h_rel
+                const bb_line = new Rect2(new Vec2(bb.x, bb.y + h * ch_info.y_off), new Vec2(bb.h, h))
+
+                letters.push({ ch, bb, bb_line, i, n, restorative_rot })
+                i += n - 1
+                break
+            }
+        }
+
+        return letters
+    }
+
+    wordify(letters_in: FontMatchedSymbol[], thresh: number = 0.01): { str: FontMatchedSymbol[], bb: Rect2 }[] {
         const letters = letters_in.map(l => l).sort((a, b) => a.bb.x - b.bb.x)
-        const words: { str: FontMatchedLetter[], bb: Rect2 }[] = []
+        const words: { str: FontMatchedSymbol[], bb: Rect2 }[] = []
 
         for (let i = 0; i < letters.length; i++) {
             const word = { str: [letters[i]], bb: letters[i].bb_line }
@@ -442,10 +575,10 @@ export class Font {
                 j--
             }
 
-            if (word.str.length === 1 && this.letter_infos.get(word.str[0].ch)!.needs_others_nearby === RequireNearbyLevel.Weak) {
+            if (word.str.length === 1 && this.symbol_infos.get(word.str[0].ch)!.needs_others_nearby === RequireNearbyLevel.Weak) {
                 continue
             }
-            if (word.str.every(({ ch }) => this.letter_infos.get(ch)!.needs_others_nearby === RequireNearbyLevel.Strong)) {
+            if (word.str.every(({ ch }) => this.symbol_infos.get(ch)!.needs_others_nearby === RequireNearbyLevel.Strong)) {
                 continue
             }
 
@@ -458,7 +591,7 @@ export class Font {
         return words.filter(word => Math.abs(1 - word.bb.h / median_height) < 0.5)
     }
 
-    static from_cfg(max_size: number, map_in: Record<string, [Partial<FontLetterInfo>, ...Array<Array<[Array<[number, number]>, boolean]>>]>): Font {
+    static from_cfg(max_size: number, map_in: Record<string, [Partial<FontSymbolInfo>, ...Array<Array<[Array<[number, number]>, boolean]>>]>): Font {
         return new Font(
             max_size,
             Object.fromEntries(
@@ -467,7 +600,7 @@ export class Font {
                         [
                             ch,
                             {
-                                paths: v.map(v => v.map(([p, loop]) => new APath(p.map(([x, y]) => new Vec2(x, y)), loop, false))),
+                                paths: v.map(v => v.map(([p, loop]) => new Path(p.map(([x, y]) => new Vec2(x, y)), loop, false))),
                                 info: { needs_others_nearby: info_partial.needs_others_nearby ?? 0, h_rel: info_partial.h_rel ?? 1, y_off: info_partial.y_off ?? 0 }
                             },
                         ]
@@ -615,9 +748,4 @@ export class Font {
         ],
 
     })
-}
-
-
-class DPathSet {
-
 }
