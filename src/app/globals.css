@@ -56,9 +56,20 @@ a {
 
 path:hover {
   stroke: aqua;
+  stroke-width: 4;
 }
 
 path.LETTER {
   fill: #f005;
   stroke: #f007;
+}
+
+path.INTR {
+  fill: #30f5;
+  /* stroke: none; */
+}
+
+path.INTR:hover {
+  fill: #30f7;
+  /* stroke: none; */
 }

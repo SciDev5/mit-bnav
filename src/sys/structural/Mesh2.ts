@@ -7,7 +7,7 @@ import { Vec2 } from "./Vec2";
 
 export class Mesh2 {
     private constructor(
-        private points: Vec2[],
+        public points: Vec2[],
         private edges: Set<U24PairUnordered>,
     ) { }
 
@@ -39,6 +39,11 @@ export class Mesh2 {
         }
         return point_n_edges
     }
+    private clean_edges() {
+        for (let i = 0; i < this.points.length; i++) {
+            this.edges.delete(encode_u24_pair_unordered(i, i))
+        }
+    }
     private edge_lut(): number[][] {
         const edge_lut: number[][] = this.points.map(() => [])
         for (const edge of this.edges) {
@@ -51,11 +56,11 @@ export class Mesh2 {
 
     jitter(scale: number) {
         this.points.forEach(v => {
-            v.x += scale * Math.random()
-            v.y += scale * Math.random()
+            v.x += scale * Math.random() / 2
+            v.y += scale * Math.random() / 2
         })
     }
-    splice_line_intersections(thresh: number) {
+    splice_line_intersections(thresh: number, line_line = true, line_point = true) {
         const thresh_sq = thresh * thresh
 
         const intersections: { iea: number, ieb: number, point_i: number }[] = []
@@ -67,55 +72,62 @@ export class Mesh2 {
         const edge_bbs = edges_endpoints.map(v => Rect2.from_points(...v))
         const edge_normals = edges_endpoints.map(([v0, v1]) => v1.minus(v0).normalized())
 
-        const tips = this.point_n_edges().map((v, i) => v <= 1 ? i : null).filter(v => v != null)
+        const tips = this.point_n_edges().map((_, i) => i)//.map((v, i) => v <= 1 ? i : null).filter(v => v != null)
         const tip_intersections: { from_point_i: number, to_ei: number, point_i: number }[] = []
 
-        for (const vi of tips) {
-            const v = this.points[vi]
-            let closest = { dist_sq: Infinity, t_a: NaN, p_line: new Vec2(0, 0) } satisfies ReturnType<typeof point_line_dist>
-            let closest_i = -1
-            for (let ei = 0; ei < edges_old.length; ei++) {
-                const [a0, a1] = edges_endpoints[ei]
-                if (a0 === v || a1 === v) continue
-                const match = point_line_dist(a0, a1, v)
-                if (match.dist_sq < closest.dist_sq) {
-                    closest_i = ei
-                    closest = match
-                }
-            }
+        if (line_point) {
+            for (const vi of tips) {
+                const v = this.points[vi]
+                // let closest = { dist_sq: Infinity, t_a: NaN, p_line: new Vec2(0, 0) } satisfies ReturnType<typeof point_line_dist>
+                // let closest_i = -1
+                for (let ei = 0; ei < edges_old.length; ei++) {
+                    const [a0, a1] = edges_endpoints[ei]
+                    if (a0 === v || a1 === v) continue
+                    const match = point_line_dist(a0, a1, v)
+                    // if (match.dist_sq < closest.dist_sq) {
+                    //     closest_i = ei
+                    //     closest = match
+                    // }
 
-            if (closest.dist_sq > thresh_sq) continue
-            let point_i = -1
-            for (const vni of decode_u24_pair(edges_old[closest_i])) {
-                if (this.points[vni].dist_sq(v) < thresh_sq) {
-                    point_i = vni
-                }
-            }
-            if (point_i === -1) {
-                point_i = this.points.length
-                this.points.push(closest.p_line)
-            }
+                    if (match.dist_sq < thresh_sq) {
+                        let point_i = vi
+                        // let point_i = -1
+                        for (const vni of decode_u24_pair(edges_old[ei])) {
+                            if (this.points[vni].dist_sq(v) < thresh_sq) {
+                                point_i = vni
+                            }
+                        }
+                        // if (point_i === -1) {
+                        //     point_i = this.points.length
+                        //     this.points.push(match.p_line)
+                        // }
 
-            tip_intersections.push({ from_point_i: vi, to_ei: closest_i, point_i })
+                        // tip_intersections.push({ from_point_i: vi, to_ei: closest_i, point_i })
+                        tip_intersections.push({ from_point_i: vi, to_ei: ei, point_i })
+                    }
+                }
+
+            }
         }
+        if (line_line) {
+            for (let iea = 0; iea < edges_old.length; iea++) {
+                const [a0, a1] = edges_endpoints[iea]
+                // const [a0i, a1i] = edges_endpoints_i[iea]
+                for (let ieb = iea + 1; ieb < edges_old.length; ieb++) {
+                    const [b0, b1] = edges_endpoints[ieb]
+                    // const [b0i, b1i] = edges_endpoints_i[ieb]
+                    if (a0 === b0 || a1 === b0 || a0 === b1 || a1 === b1) continue
+                    if (!edge_bbs[iea].intersects(edge_bbs[ieb])) continue
 
-        for (let iea = 0; iea < edges_old.length; iea++) {
-            const [a0, a1] = edges_endpoints[iea]
-            // const [a0i, a1i] = edges_endpoints_i[iea]
-            for (let ieb = iea + 1; ieb < edges_old.length; ieb++) {
-                const [b0, b1] = edges_endpoints[ieb]
-                // const [b0i, b1i] = edges_endpoints_i[ieb]
-                if (a0 === b0 || a1 === b0 || a0 === b1 || a1 === b1) continue
-                if (!edge_bbs[iea].intersects(edge_bbs[ieb])) continue
+                    const { p } = line_line_intersect_t_a(a0, a1, b0, b1)
+                    if (p == null) continue
 
-                const { p } = line_line_intersect_t_a(a0, a1, b0, b1)
-                if (p == null) continue
+                    // console.log(t_a, p, a0, a1, b0, b1);
 
-                // console.log(t_a, p, a0, a1, b0, b1);
-
-                const point_i = this.points.length
-                this.points.push(p)
-                intersections.push({ iea, ieb, point_i })
+                    const point_i = this.points.length
+                    this.points.push(p)
+                    intersections.push({ iea, ieb, point_i })
+                }
             }
         }
 
@@ -133,7 +145,7 @@ export class Mesh2 {
         for (let ei = 0; ei < intersections_by_edge.length; ei++) {
             const n = edge_normals[ei]
             const inters = intersections_by_edge[ei]
-                .sort((a, b) => n.dot(this.points[a.point_i]) - n.dot(this.points[b.point_i]))
+                .sort((a, b) => (n.dot(this.points[a.point_i]) - n.dot(this.points[b.point_i])))
 
             const [i0, ilast] = decode_u24_pair(edges_old[ei])
             const point_indices = [i0, ...inters.map(v => v.point_i), ilast]
@@ -151,13 +163,15 @@ export class Mesh2 {
         const points = this.points
             .map((p, i) => ({
                 p,
-                l: Math.round(p.x / thresh) * Math.PI + Math.round(p.y / thresh),
+                x: Math.round(p.x / thresh),
+                y: Math.round(p.y / thresh),
                 i,
             }))
-            .toSorted((a, b) => a.l - b.l)
+            .toSorted((a, b) => a.x - b.x)
+            .sort((a, b) => a.y - b.y)
         const points_out: { p: Vec2, i: number[] }[] = []
         for (let i = points.length - 2; i >= -1; i--) {
-            if (points[i]?.l === points[i + 1].l) continue
+            if ((Math.abs(points[i]?.x - points[i + 1].x) < thresh / 2) && (Math.abs(points[i]?.y - points[i + 1].y) < thresh / 2)) continue
 
             const points_to_merge = points.splice(i + 1)
             points_out.push({
@@ -189,7 +203,102 @@ export class Mesh2 {
 
     }
 
+    closest_point(v: Vec2): number {
+        let closest_i = 0
+        let best_dist = v.dist_sq(this.points[0])
+        for (let i = 1; i < this.points.length; i++) {
+            const dist = v.dist_sq(this.points[i])
+            if (dist < best_dist) {
+                best_dist = dist
+                closest_i = i
+            }
+        }
+        return closest_i
+    }
+    closest_point_vec2(v: Vec2): Vec2 {
+        const i = this.closest_edge(v)
+        return this.points[i]
+    }
+    closest_edge(v: Vec2): number {
+        this.clean_edges()
+        let closest = 0
+        let best_dist = v.dist_sq(this.points[0])
+        for (const e of this.edges) {
+            const [i0, i1] = decode_u24_pair(e)
+
+            const dist = v.dist_to_segment_sq(this.points[i0], this.points[i1])
+            if (dist < best_dist) {
+                best_dist = dist
+                closest = e
+            }
+        }
+        return closest
+    }
+    closest_edge_vec2(v: Vec2): [Vec2, Vec2] {
+        const [i0, i1] = decode_u24_pair(this.closest_edge(v))
+        return [this.points[i0], this.points[i1]]
+    }
+
+
+    trace_interiors(): number[][] {
+        this.clean_edges()
+        const edge_lut = this.edge_lut()
+        const points_state = this.points.map((p, i) =>
+            edge_lut[i]
+                .map((to) => ({ to, arg: this.points[to].minus(p).arg() }))
+                .sort((a, b) => a.arg - b.arg)
+                .map(({ to }) => ({ to, followed: false }))
+        )
+        const unfinished = new Set(
+            points_state
+                .map((v, i) => ({ v, i }))
+                .filter(({ v, i }) => v.length > 0).map(({ i }) => i)
+        )
+
+
+        const zones = []
+        let ITERS = 100000
+        while (unfinished.size > 0) {
+            let i = (unfinished.values().next() as IteratorYieldResult<U24PairUnordered>).value
+            const i0 = i
+            let to = points_state[i].findIndex(v => !v.followed)
+
+            const path = []
+            while (true) {
+                points_state[i][to].followed = true
+                if (points_state[i].every(v => v.followed)) {
+                    unfinished.delete(i)
+                }
+                path.push(i)
+
+                const j = points_state[i][to].to // NOTE: no need to check followed because the loops can only be reached from within, and whole loops get marked at once
+                const from = points_state[j].findIndex(v => v.to === i)
+
+                to = (from + 1) % points_state[j].length
+                i = j
+                if (i === i0) {
+                    break
+                }
+                ITERS--
+                if (ITERS <= 0) {
+                    console.log("ZPU", zones, path, unfinished);
+
+                    throw "out of iters"
+                }
+            }
+
+            zones.push(path)
+        }
+
+        return zones
+    }
+    trace_interiors_as_vec2(): Vec2[][] {
+        return this.trace_interiors().map(v => v.map(i => this.points[i]))
+    }
+
+
     to_paths(): Path[] {
+        this.clean_edges()
         const point_n_edges = this.point_n_edges()
         const unfinished = new Set(
             point_n_edges
@@ -205,7 +314,14 @@ export class Mesh2 {
             const i0 = i
             let loop = false
             const path_points = [this.points[i].copy()]
+            const prev: number[] = []
             while (true) {
+                for (let z = 0; z < edge_lut[i].length; z++) {
+                    const y = Math.floor(Math.random() * edge_lut[i].length)
+                    const [vz, vy] = [edge_lut[i][z], edge_lut[i][y]]
+                    edge_lut[i][z] = vy
+                    edge_lut[i][y] = vz
+                }
                 const j = edge_lut[i].pop()
                 if (j == null) break
                 edge_lut[j].splice(edge_lut[j].indexOf(i), 1)
@@ -220,6 +336,10 @@ export class Mesh2 {
                 if (edge_lut[j].length === 0) unfinished.delete(j)
 
                 if (loop) { break }
+
+                if (prev.includes(j)) break
+                prev.push(j)
+
                 i = j
             }
             if (!loop) {

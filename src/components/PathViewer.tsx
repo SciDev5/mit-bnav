@@ -1,6 +1,7 @@
 import { KeyboardEvent, MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Path } from "../sys/structural/Path";
 import { clamp } from "@/sys/math";
+import { Vec2 } from "@/sys/structural/Vec2";
 
 function PathLayer({
     paths,
@@ -15,12 +16,13 @@ function PathLayer({
 }) {
     return (<>{
         paths.map((path, i) => {
+            const selected = sel ? i >= sel.sel_i && i - sel.sel_i < sel.sel_n : false
             const color = sel
-                ? (i >= sel.sel_i && i - sel.sel_i < sel.sel_n ? "#0f0" : "#fff")
+                ? (selected ? "#0f0" : "#fff")
                 : "#00f"
 
             return (
-                <OnePath {...{ path, color, scale, path_class }} key={i}
+                <OnePath {...{ path, color, scale, path_class, selected }} key={i}
                     on_click={e => {
                         if (e.shiftKey) return
                         sel?.set_i?.(i)
@@ -34,15 +36,15 @@ function PathLayer({
         })
     }</>)
 }
-function OnePath({ path, scale, color, path_class, on_click, on_mouse_over }: {
-    path: Path, scale: number, color: string, path_class?: string,
+function OnePath({ path, scale, selected, color, path_class, on_click, on_mouse_over }: {
+    path: Path, scale: number, selected: boolean, color: string, path_class?: string,
     on_click?: (e: MouseEvent<SVGPathElement>) => void,
     on_mouse_over?: (e: MouseEvent<SVGPathElement>) => void,
 }) {
     return (
         <path
             d={path.stringify(scale)}
-            strokeWidth={2}
+            strokeWidth={selected ? 4 : 2}
             className={path_class + " " + (path.id ?? "")}
             stroke={path.filled ?? false ? "none" : color}
             fill={path.filled ?? false ? color : "none"}
@@ -64,13 +66,14 @@ export function PathViewerSimple({
     return (<svg width={size} height={size}>
         <g transform="translate(1,1)">
             {path.map((path, i) => (
-                <OnePath {...{ path, scale: size - 2, color: "#fff" }} key={i} />
+                <OnePath {...{ path, scale: size - 2, color: "#fff", selected: false }} key={i} />
             ))}
         </g>
     </svg>)
 }
 export function PathViewer({
     layers,
+    on_click,
 }: {
     layers: {
         paths: Path[],
@@ -78,20 +81,34 @@ export function PathViewer({
         path_class?: string,
         sel?: { sel_i: number, sel_n: number, set_i?: (i: number) => void },
     }[],
+    on_click?: (e: MouseEvent, p: Vec2) => void,
 }) {
     const [true_scale, set_true_scale] = useState(1)
-    return (<Locator {...{ set_true_scale, true_scale }}>
+    return (<Locator {...{ set_true_scale, true_scale, on_click }}>
         {layers.map(({ paths, key, path_class, sel }) => (
             <PathLayer {...{ paths, path_class, sel }} scale={true_scale} key={key} />
         ))}
     </Locator>)
 }
 
+function mouse_pos(e: MouseEvent<HTMLElement | SVGElement>) {
+    return {
+        mouse_x: e.nativeEvent.offsetX,
+        mouse_y: e.nativeEvent.offsetY,
+    }
+}
+
 function Locator({
     children,
     true_scale,
     set_true_scale,
-}: { children: JSX.Element[], true_scale: number, set_true_scale: (true_scale: number) => void }) {
+    on_click,
+}: {
+    children: JSX.Element[],
+    true_scale: number,
+    set_true_scale: (true_scale: number) => void,
+    on_click?: (e: MouseEvent, p: Vec2) => void,
+}) {
     const [fast_scale, set_fast_scale] = useState(1)
     const [offset_x, set_offset_x] = useState(0)
     const [offset_y, set_offset_y] = useState(0)
@@ -112,9 +129,11 @@ function Locator({
         width={"100vw"}
         height={"calc(80vh - 2em)"}
         onMouseDown={e => {
+            const { mouse_x, mouse_y } = mouse_pos(e)
+            on_click?.(e, new Vec2(((mouse_x - offset_x) / fast_scale) / true_scale, ((mouse_y - offset_y) / fast_scale) / true_scale))
             if (e.ctrlKey) return
-            prevpos.x = e.clientX
-            prevpos.y = e.clientY
+            prevpos.x = mouse_x
+            prevpos.y = mouse_y
             curpos.x = offset_x
             curpos.y = offset_y
             set_down(true)
@@ -122,23 +141,26 @@ function Locator({
         onMouseUp={() => set_down(false)}
         onMouseLeave={() => set_down(false)}
         onMouseMove={e => {
+            const { mouse_x, mouse_y } = mouse_pos(e)
             if (!down) return
-            const delta_x = e.clientX - prevpos.x
-            const delta_y = e.clientY - prevpos.y
-            prevpos.x = e.clientX
-            prevpos.y = e.clientY
+            const delta_x = mouse_x - prevpos.x
+            const delta_y = mouse_y - prevpos.y
+            prevpos.x = mouse_x
+            prevpos.y = mouse_y
             curpos.x += delta_x
             curpos.y += delta_y
             set_offset_x(curpos.x)
             set_offset_y(curpos.y)
         }}
         onWheel={e => {
-            const x = (e.clientX - offset_x) / fast_scale
-            const y = (e.clientY - offset_y) / fast_scale
+            const { mouse_x, mouse_y } = mouse_pos(e)
+
+            const x = (mouse_x - offset_x) / fast_scale
+            const y = (mouse_y - offset_y) / fast_scale
             const new_fast_scale = fast_scale * Math.exp(-e.deltaY / 1000)
             set_fast_scale(new_fast_scale)
-            set_offset_x(e.clientX - x * new_fast_scale)
-            set_offset_y(e.clientY - y * new_fast_scale)
+            set_offset_x(mouse_x - x * new_fast_scale)
+            set_offset_y(mouse_y - y * new_fast_scale)
         }}
     >
         <g

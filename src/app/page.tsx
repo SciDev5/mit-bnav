@@ -11,17 +11,21 @@ import { DoorPatternEditor, FontEditor, useDoorMatcher, useDoorPatterns, useDoor
 import { Mesh2 } from "@/sys/structural/Mesh2";
 import { Rect2 } from "@/sys/structural/Rect2";
 import { Vec2 } from "@/sys/structural/Vec2";
+import { FloorEditor } from "@/components/FloorEditor";
 
 
 export default function Home() {
     const [paths, set_paths] = useState<Path[]>([])
     const [loading_paths, set_loading_paths] = useState<Path[] | null>(null)
     const [q, set_q] = useState<Path[]>([])
+    const [mesh, set_mesh] = useState<Mesh2>(Mesh2.from_paths([]))
     const [p_m, set_p_m] = useState<Path[]>([])
     const [sel_i, set_sel_i] = useState(0)
     const [sel_n, set_sel_n] = useState(1)
     const [show_words, set_show_words] = useState(false)
     const [hide_words, set_hide_words] = useState(false)
+
+    const [interiors, set_interiors] = useState<Path[]>([])
 
     const [k, set_k] = useState(false)
 
@@ -32,7 +36,7 @@ export default function Home() {
 
     useEffect(() => {
         const pr = paths.map(v => v.bounding_box()).reduce((a, b) => a.dim.mag_sq() > b.dim.mag_sq() ? a : b, new Rect2(new Vec2(0, 0), new Vec2(0, 0)))
-        const paths_ = paths.filter(v => v.bounding_box().intersects(pr))
+        const paths_ = paths.filter(v => v.bounding_box().intersects(pr) && v.bounding_box().dim.mag_sq() < pr.dim.mag_sq())
 
 
         const l = font.find_symbols(paths_, 0.1)
@@ -54,12 +58,24 @@ export default function Home() {
             p_m.splice(i, n)
         }
         const m = Mesh2.from_paths(p_m)
-        m.merge_by_dist_simple(0.1)
-        m.splice_line_intersections(5)
         m.merge_by_dist_simple(2)
+        m.splice_line_intersections(3, false, true)
+        m.merge_by_dist_simple(3)
+        m.splice_line_intersections(-1, true, false)
+        m.splice_line_intersections(0.1, false, true)
+        m.merge_by_dist_simple(0.1)
+
         // m.merge_by_dist_simple(100)
-        // m.jitter(2)
+        set_mesh(m)
         set_p_m(m.to_paths())
+        set_interiors(
+            m.trace_interiors_as_vec2()
+                .map(v => [v, Vec2.loop_signed_area(v)] satisfies [any, any])
+                .filter(v => v[1] > 0)
+                .sort((a, b) => b[1] - a[1])
+                // .slice(0, 50)
+                .map(v => new Path(v[0], true, false, undefined, "INTR"))
+        )
     }, [paths, font, door_matcher])
 
     const path_selection_on_key_down = usePathSelectionOnKeyDown(paths, sel_i, set_sel_i, sel_n, set_sel_n)
@@ -107,26 +123,33 @@ export default function Home() {
                     <H paths={paths} />
                 </Suspense>
             ) : (
-                <PathViewer layers={[
-                    ...(show_words ? [{
-                        paths: q,
-                        key: "letters",
-                        path_class: "LETTER",
-                    }] : []),
-                    hide_words ? {
-                        paths: p_m,
-                        key: "paths",
-                    } : {
-                        paths: paths,
-                        key: "paths",
-                        sel: {
-                            sel_i, sel_n, set_i(i) {
-                                set_sel_i(i)
-                                set_sel_n(1)
-                            },
-                        }
-                    },
-                ]} />
+
+                <FloorEditor mesh={mesh} />
+                // <PathViewer layers={[
+                //     {
+                //         key: "z",
+                //         paths: interiors,
+                //         path_class: "INTR",
+                //     },
+                //     ...(show_words ? [{
+                //         paths: q,
+                //         key: "letters",
+                //         path_class: "LETTER",
+                //     }] : []),
+                //     hide_words ? {
+                //         paths: p_m,
+                //         key: "paths",
+                //     } : {
+                //         paths: paths,
+                //         key: "paths",
+                //         sel: {
+                //             sel_i, sel_n, set_i(i) {
+                //                 set_sel_i(i)
+                //                 set_sel_n(1)
+                //             },
+                //         }
+                //     },
+                // ]} />
             )}
         </div>
     );

@@ -52,6 +52,16 @@ export class Vec2 {
     dot(rhs: Vec2): number {
         return this.x * rhs.x + this.y * rhs.y
     }
+    arg(): number {
+        return Math.atan2(this.y, this.x)
+    }
+
+    static loop_signed_area(points: Vec2[]): number {
+        return points
+            .map((v, i) => [v, points[(i + 1) % points.length]])
+            .map(([a, b]) => (b.x - a.x) * (b.y + a.y))
+            .reduce((a, b) => a + b)
+    }
 }
 
 export type Vec2JSON = [number, number]

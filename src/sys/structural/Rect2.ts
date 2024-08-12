@@ -41,6 +41,10 @@ export class Rect2 {
     get h() { return this.dim.y }
     set h(h) { this.dim.y = h }
 
+    area(): number {
+        return this.w * this.h
+    }
+
 
     to_json(): Rect2JSON {
         return [this.x, this.y, this.w, this.h]

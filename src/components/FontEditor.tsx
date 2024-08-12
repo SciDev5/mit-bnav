@@ -64,7 +64,7 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
 
     useEffect(() => {
         const pr = paths.map(v => v.bounding_box()).reduce((a, b) => a.dim.mag_sq() > b.dim.mag_sq() ? a : b, new Rect2(new Vec2(0, 0), new Vec2(0, 0)))
-        const paths_ = paths.filter(v => v.bounding_box().intersects(pr))
+        const paths_ = paths.filter(v => v.bounding_box().intersects(pr) && v.bounding_box().dim.mag_sq() < pr.dim.mag_sq())
 
 
         const l = font.find_symbols(paths_, 0.1)
