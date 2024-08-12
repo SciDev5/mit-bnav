@@ -48,6 +48,19 @@ export class Rect2 {
     static from_json([x, y, w, h]: Rect2JSON): Rect2 {
         return new Rect2(new Vec2(x, y), new Vec2(w, h))
     }
+    static from_points(...points: Vec2[]): Rect2 {
+        const x_min = Math.min(...points.map(v => v.x))
+        const x_max = Math.max(...points.map(v => v.x))
+        const y_min = Math.min(...points.map(v => v.y))
+        const y_max = Math.max(...points.map(v => v.y))
+        return new Rect2(
+            new Vec2(x_min, y_min),
+            new Vec2(x_max - x_min, y_max - y_min),
+        )
+    }
+    intersects(other: Rect2): boolean {
+        return (this.x_min <= other.x_max && this.x_max >= other.x_min) && (this.y_min <= other.y_max && this.y_max >= other.y_min)
+    }
 }
 
 export type Rect2JSON = [number, number, number, number]

@@ -48,6 +48,10 @@ export class Vec2 {
     static from_json([x, y]: Vec2JSON): Vec2 {
         return new Vec2(x, y)
     }
+
+    dot(rhs: Vec2): number {
+        return this.x * rhs.x + this.y * rhs.y
+    }
 }
 
 export type Vec2JSON = [number, number]

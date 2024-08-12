@@ -1,10 +1,11 @@
 import { Font, FontJSON, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
 import { useLocalhost } from "@/sys/use";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PathSelectionInput, PathViewer, PathViewerSimple, usePathSelectionOnKeyDown, usePathSelectionState } from "./PathViewer";
 import { Path } from "@/sys/structural/Path";
 import { DoorMatcher, DoorPattern, doorpattern_from_json, DoorPatternJSON } from "@/sys/pattern_matching/Door";
 import { Vec2 } from "@/sys/structural/Vec2";
+import { Rect2 } from "@/sys/structural/Rect2";
 
 const LOCALSTORAGE_IDS = {
     FONT: "_bnav_font",
@@ -30,6 +31,11 @@ export function useDoorMatcher(doors: DoorPatternJSON[]): DoorMatcher {
 
 
 export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[], font_json: FontJSON, set_font_json: (font: FontJSON) => void }) {
+    const [words_highlight, set_words_highlight] = useState<Path[]>([])
+    const [paths_text_negative, set_paths_text_negative] = useState<Path[]>([])
+
+    const [view_mode, set_view_mode] = useState(false)
+
     const [sel_i, sel_n, set_sel_i, set_sel_n, set_sel] = usePathSelectionState(0, 1)
 
     const path_selection_on_key_down = usePathSelectionOnKeyDown(paths, sel_i, set_sel_i, sel_n, set_sel_n)
@@ -37,13 +43,49 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
         const ch = prompt("what letter is this")
         if (ch == null) return
         font_json.map[ch] ??= { info: { needs_others_nearby: RequireNearbyLevel.None }, variants: [] }
-        font_json.map[ch].variants.push({
-            path: Path.conormalize(paths.slice(sel_i, sel_i + sel_n)).map(p => p.to_json()),
-            h_rel: 1,
-            y_off: 0,
-        })
-        set_font_json({ ...font_json })
+        const path = Path.conormalize(paths.slice(sel_i, sel_i + sel_n)).map(p => p.to_json())
+        if (
+            !font_json.map[ch].variants.some(
+                ({ path: p }) => p.every((v, i) =>
+                    v.loop == path[i].loop &&
+                    v.points.length == path[i].points.length &&
+                    v.points.every((p, j) => Vec2.from_json(path[i].points[j]).dist_sq(Vec2.from_json(p)) < 0.009)
+                )
+            )
+        ) {
+            font_json.map[ch].variants.push({
+                path,
+                h_rel: 1,
+                y_off: 0,
+            })
+            set_font_json({ ...font_json })
+        }
     }, [sel_i, sel_n, set_font_json, font_json, paths])
+
+    useEffect(() => {
+        const pr = paths.map(v => v.bounding_box()).reduce((a, b) => a.dim.mag_sq() > b.dim.mag_sq() ? a : b, new Rect2(new Vec2(0, 0), new Vec2(0, 0)))
+        const paths_ = paths.filter(v => v.bounding_box().intersects(pr))
+
+
+        const l = font.find_symbols(paths_, 0.1)
+        const w = font.wordify(l, 0.1)
+        // const d = door_matcher.find_doors(paths, 0.1)
+        // console.log(l, w);
+        set_words_highlight(w.flatMap(({ str, bb }) => Path.parse_dstr(`m ${bb.pos.x} ${bb.pos.y} h ${bb.dim.x} v ${bb.dim.y} h -${bb.dim.x} z`, {}, "LETTER " + str.map(v => v.ch).join(""))))
+
+
+        const remove_indices = [...w.flatMap(v => v.str)].sort((a, b) => b.i - a.i)
+        // const remove_indices = [...w.flatMap(v => v.str), ...d].sort((a, b) => b.i - a.i)
+
+        const p_m = [...paths_]
+        for (const { i, n } of remove_indices) {
+            p_m.splice(i, n)
+        }
+        set_paths_text_negative(p_m)
+    }, [font_json])
+
+    const font = useFont(font_json)
+
     return (
         <div
             onKeyDown={e => {
@@ -57,6 +99,7 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
             }}
             tabIndex={0}
         >
+            <input checked={view_mode} onChange={e => set_view_mode(e.currentTarget.checked)} type="checkbox" />
             <PathSelectionInput {...{ sel_i, sel_n, set_sel_i, set_sel_n, paths }} />
             <button onClick={add_symbol}>add symbol</button>
             <div style={{ maxHeight: "10vh", overflow: "scroll", display: "flex", flexWrap: "wrap" }}>
@@ -74,11 +117,16 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
                         </select>
                         {
                             variants.map(({ path, h_rel, y_off }, i) => (
-                                <PathViewerSimple
-                                    path={path.map(Path.from_json)}
-                                    size={32}
-                                    key={i}
-                                />
+                                <span key={i} onClick={() => {
+                                    if (!confirm("remove variant")) return
+                                    variants.splice(i, 1)
+                                    set_font_json({ ...font_json })
+                                }}>
+                                    <PathViewerSimple
+                                        path={path.map(Path.from_json)}
+                                        size={32}
+                                    />
+                                </span>
                             ))
                         }
                     </div>
@@ -87,6 +135,14 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
             <PathViewer
                 layers={[
                     {
+                        paths: words_highlight,
+                        key: "words",
+                        path_class: "LETTER",
+                    },
+                    view_mode ? {
+                        paths: paths_text_negative,
+                        key: "neg",
+                    } : {
                         paths,
                         key: "",
                         sel: {

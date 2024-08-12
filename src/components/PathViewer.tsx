@@ -43,7 +43,7 @@ function OnePath({ path, scale, color, path_class, on_click, on_mouse_over }: {
         <path
             d={path.stringify(scale)}
             strokeWidth={2}
-            className={path_class}
+            className={path_class + " " + (path.id ?? "")}
             stroke={path.filled ?? false ? "none" : color}
             fill={path.filled ?? false ? color : "none"}
             onClick={on_click}

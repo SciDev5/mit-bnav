@@ -240,6 +240,7 @@ export class Path {
         public loop: boolean,
         public filled: boolean,
         public src?: string,
+        public id?: string,
     ) { }
 
     static load_paths(svg_src: string): Path[] | null {
@@ -265,14 +266,14 @@ export class Path {
                     if (building != null) {
                         paths.push(building)
                     }
-                    building = new Path([], false, d.style.filled ?? false, d.src)
+                    building = new Path([], false, d.style.filled ?? false, d.src, d.id)
                 }
                 pos = s.relative ? pos.plus(v) : v
-                building ??= new Path([], false, d.style.filled ?? false, d.src)
+                building ??= new Path([], false, d.style.filled ?? false, d.src, d.id)
                 building.points.push(pos)
             }
             if (s instanceof DCommandClose) {
-                building ??= new Path([], false, d.style.filled ?? false, d.src)
+                building ??= new Path([], false, d.style.filled ?? false, d.src, d.id)
                 building.loop = true
             }
         }

@@ -8,6 +8,9 @@ import { Font, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
 import { PathViewer, usePathSelectionOnKeyDown } from "@/components/PathViewer";
 import { FloorImporter } from "@/components/FloorImporter";
 import { DoorPatternEditor, FontEditor, useDoorMatcher, useDoorPatterns, useDoorPatternsJSON, useFont, useFontJSON } from "@/components/FontEditor";
+import { Mesh2 } from "@/sys/structural/Mesh2";
+import { Rect2 } from "@/sys/structural/Rect2";
+import { Vec2 } from "@/sys/structural/Vec2";
 
 
 export default function Home() {
@@ -27,27 +30,36 @@ export default function Home() {
     const [doorpatterns_json] = useDoorPatternsJSON()
     const door_matcher = useDoorMatcher(doorpatterns_json)
 
-
     useEffect(() => {
-        const l = font.find_symbols(paths, 0.1)
+        const pr = paths.map(v => v.bounding_box()).reduce((a, b) => a.dim.mag_sq() > b.dim.mag_sq() ? a : b, new Rect2(new Vec2(0, 0), new Vec2(0, 0)))
+        const paths_ = paths.filter(v => v.bounding_box().intersects(pr))
+
+
+        const l = font.find_symbols(paths_, 0.1)
         const w = font.wordify(l, 0.1)
-        const d = door_matcher.find_doors(paths, 0.1)
+        // const d = door_matcher.find_doors(paths, 0.1)
         // console.log(l, w);
         set_q(w.flatMap(({ str, bb }) => Path.parse_dstr(`m ${bb.pos.x} ${bb.pos.y} h ${bb.dim.x} v ${bb.dim.y} h -${bb.dim.x} z`, {}, "LETTER " + str.map(v => v.ch).join(""))))
 
         // const d = Font.DOORS.find_symbols_rotated(paths, 0.1)
-        console.log("d", d);
+        // console.log("d", d);
 
         // set_q(d.flatMap(({ bb }) => Path.parse_dstr(`m ${bb.pos.x} ${bb.pos.y} h ${bb.dim.x} v ${bb.dim.y} h -${bb.dim.x} z`, {}, "LETTER")))
 
-        // const remove_indices = [...w.flatMap(v => v.str)].sort((a, b) => b.i - a.i)
-        const remove_indices = [...w.flatMap(v => v.str), ...d].sort((a, b) => b.i - a.i)
+        const remove_indices = [...w.flatMap(v => v.str)].sort((a, b) => b.i - a.i)
+        // const remove_indices = [...w.flatMap(v => v.str), ...d].sort((a, b) => b.i - a.i)
 
-        const p_m = [...paths]
+        const p_m = [...paths_]
         for (const { i, n } of remove_indices) {
             p_m.splice(i, n)
         }
-        set_p_m(p_m)
+        const m = Mesh2.from_paths(p_m)
+        m.merge_by_dist_simple(0.1)
+        m.splice_line_intersections(5)
+        m.merge_by_dist_simple(2)
+        // m.merge_by_dist_simple(100)
+        // m.jitter(2)
+        set_p_m(m.to_paths())
     }, [paths, font, door_matcher])
 
     const path_selection_on_key_down = usePathSelectionOnKeyDown(paths, sel_i, set_sel_i, sel_n, set_sel_n)
@@ -126,6 +138,6 @@ function H({ paths }: { paths: Path[] }) {
 
     return (<>
         <FontEditor {...{ font_json, set_font_json, paths }} />
-        <DoorPatternEditor {...{ doorpatterns_json, set_doorpatterns_json, paths }} />
+        {/* <DoorPatternEditor {...{ doorpatterns_json, set_doorpatterns_json, paths }} /> */}
     </>)
 }
