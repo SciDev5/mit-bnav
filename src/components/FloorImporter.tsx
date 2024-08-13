@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PathViewer } from "./PathViewer";
 import { Path } from "../sys/structural/Path";
+import { Rect2 } from "@/sys/structural/Rect2";
 
 export function FloorImporter({ paths, export_scaled_paths }: { paths: Path[], export_scaled_paths: (paths: Path[]) => void }) {
     const [sel_i, set_sel_i] = useState(0)

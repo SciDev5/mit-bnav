@@ -1,11 +1,86 @@
-import { Vec2 } from "./structural/Vec2"
+import { FontMatchedWord } from "./pattern_matching/Font"
+import { Mesh2, Mesh2JSON } from "./structural/Mesh2"
+import { Path, PathJSON } from "./structural/Path"
+import { Rect2, Rect2JSON } from "./structural/Rect2"
 
 export class Floor {
+    private can_overwrite = false
     constructor(
         public building: string,
         public floor: number,
+        readonly raw: Path[],
+        public words: FontMatchedWord[],
+        readonly mesh: Mesh2,
         readonly layout: FloorLayout,
     ) { }
+
+    private localstorage_id() {
+        // if (this.building.length == 0) return null
+        // return `FLOORDATA;${this.building};${this.floor}`
+        return `FLOORDATA`
+    }
+
+    save_localstorage() {
+        const localstorage_id = this.localstorage_id()
+        console.log("SAVING", localstorage_id);
+        if (localstorage_id == null) return
+        if (!this.can_overwrite && localStorage.getItem(localstorage_id) != null && !confirm("data is present. overwrite?")) return
+        this.can_overwrite = true
+        localStorage.setItem(localstorage_id, JSON.stringify(this.to_json()))
+    }
+    load_localstorage(): boolean {
+        const localstorage_id = this.localstorage_id()
+        if (localstorage_id == null) return false
+        console.log(localstorage_id);
+
+        const data = localStorage.getItem(localstorage_id)
+        if (data == null) {
+            // alert(`no data for floor ${this.floor} of '${this.building}'`)
+            alert(`no data for floor`)
+            return false
+        }
+        this.modify_from_json(JSON.parse(data))
+        this.can_overwrite = true
+        return true
+    }
+
+    to_json(): FloorJSON {
+        return {
+            building: this.building,
+            floor: this.floor,
+            raw: this.raw.map(v => v.to_json()),
+            mesh: this.mesh.to_json(),
+            rooms: this.layout.rooms.map(room => ({
+                info: room.info,
+                path: room.path,
+                path_negatives: room.path_negatives
+            })),
+            words: this.words.map(word => ({
+                str: word.str.map(({ ch, bb, bb_line, i, n }) => ({ ch, bb: bb.to_json(), bb_line: bb_line.to_json(), i, n })),
+                bb: word.bb.to_json(),
+            })),
+        }
+    }
+    modify_from_json(json: FloorJSON) {
+        this.building = json.building
+        this.floor = json.floor
+        this.raw.splice(0, this.raw.length, ...json.raw.map(Path.from_json));
+        (this as any).mesh = Mesh2.from_json(json.mesh)
+        this.layout.rooms.splice(0, this.layout.rooms.length, ...json.rooms.map(v => new Room(v.info, v.path, v.path_negatives)))
+        this.words = json.words.map(word => ({
+            str: word.str.map(({ ch, bb, bb_line, i, n }) => ({ ch, bb: Rect2.from_json(bb), bb_line: Rect2.from_json(bb_line), i, n })),
+            bb: Rect2.from_json(word.bb),
+        }))
+    }
+}
+export interface FloorJSON {
+    building: string,
+    floor: number,
+    raw: PathJSON[],
+    words: { str: { ch: string, bb: Rect2JSON, bb_line: Rect2JSON, i: number, n: number }[], bb: Rect2JSON }[],
+    mesh: Mesh2JSON,
+    // doors: { path: number[]}[],
+    rooms: { info: RoomInfo, path: number[], path_negatives: number[][] }[],
 }
 
 export interface FloorLayoutEditState {
@@ -15,7 +90,7 @@ export interface FloorLayoutEditState {
 
 export class FloorLayout {
     constructor(
-        readonly points: Vec2[],
+        // readonly points: Vec2[],
         readonly doors: Door[],
         readonly rooms: Room[],
     ) {
@@ -95,7 +170,7 @@ export function roomtype_str(type: RoomType) {
     return {
         [RoomType.Hallway]: "hallway",
         [RoomType.DiningHall]: "dining hall",
-        [RoomType.Kitchen]: "Kitchen",
+        [RoomType.Kitchen]: "kitchen",
         [RoomType.Lounge]: "lounge",
         [RoomType.Lobby]: "lobby",
         [RoomType.CommonArea]: "common area",
@@ -107,12 +182,10 @@ export function roomtype_str(type: RoomType) {
     }[type]
 }
 
-export class RoomInfo {
-    constructor(
-        public id: string,
-        public type: RoomType,
-        public nickname: string | null,
-    ) { }
+export interface RoomInfo {
+    id: string,
+    type: RoomType,
+    nickname: string | null,
 }
 
 export class Room {
@@ -147,12 +220,7 @@ export class Room {
 
     copy(keep_info_intact = false) {
         return new Room(
-            keep_info_intact ? this.info : new RoomInfo(
-                this.info.id,
-                this.info.type,
-                //  { ...this.info.spec },
-                this.info.nickname,
-            ),
+            keep_info_intact ? this.info : { ...this.info },
             [...this.path],
             this.path_negatives.map(v => [...v]),
         )

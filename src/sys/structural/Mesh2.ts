@@ -2,7 +2,7 @@ import { assert, THROW } from "../assertion";
 import { decode_u24_pair, encode_u24_pair_unordered, line_line_intersect_t_a, point_line_dist, U24PairUnordered } from "../math";
 import { Path } from "./Path";
 import { Rect2 } from "./Rect2";
-import { Vec2 } from "./Vec2";
+import { Vec2, Vec2JSON } from "./Vec2";
 
 
 export class Mesh2 {
@@ -371,4 +371,21 @@ export class Mesh2 {
 
         return paths
     }
+
+    to_json(): Mesh2JSON {
+        return {
+            points: this.points.map(v => v.to_json()),
+            edges: [...this.edges],
+        }
+    }
+    static from_json(json: Mesh2JSON) {
+        return new Mesh2(
+            json.points.map(Vec2.from_json),
+            new Set(json.edges),
+        )
+    }
+}
+export interface Mesh2JSON {
+    points: Vec2JSON[],
+    edges: U24PairUnordered[],
 }
