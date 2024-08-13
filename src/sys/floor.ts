@@ -14,34 +14,34 @@ export class Floor {
         readonly layout: FloorLayout,
     ) { }
 
-    private localstorage_id() {
+    private static localstorage_id() {
         // if (this.building.length == 0) return null
         // return `FLOORDATA;${this.building};${this.floor}`
         return `FLOORDATA`
     }
 
     save_localstorage() {
-        const localstorage_id = this.localstorage_id()
+        const localstorage_id = Floor.localstorage_id()
         console.log("SAVING", localstorage_id);
         if (localstorage_id == null) return
         if (!this.can_overwrite && localStorage.getItem(localstorage_id) != null && !confirm("data is present. overwrite?")) return
         this.can_overwrite = true
         localStorage.setItem(localstorage_id, JSON.stringify(this.to_json()))
     }
-    load_localstorage(): boolean {
+    static load_localstorage(): Floor | null {
         const localstorage_id = this.localstorage_id()
-        if (localstorage_id == null) return false
+        if (localstorage_id == null) return null
         console.log(localstorage_id);
 
         const data = localStorage.getItem(localstorage_id)
         if (data == null) {
             // alert(`no data for floor ${this.floor} of '${this.building}'`)
             alert(`no data for floor`)
-            return false
+            return null
         }
-        this.modify_from_json(JSON.parse(data))
-        this.can_overwrite = true
-        return true
+        const floor = this.from_json(JSON.parse(data))
+        floor.can_overwrite = true
+        return floor
     }
 
     to_json(): FloorJSON {
@@ -61,16 +61,22 @@ export class Floor {
             })),
         }
     }
-    modify_from_json(json: FloorJSON) {
-        this.building = json.building
-        this.floor = json.floor
-        this.raw.splice(0, this.raw.length, ...json.raw.map(Path.from_json));
-        (this as any).mesh = Mesh2.from_json(json.mesh)
-        this.layout.rooms.splice(0, this.layout.rooms.length, ...json.rooms.map(v => new Room(v.info, v.path, v.path_negatives)))
-        this.words = json.words.map(word => ({
-            str: word.str.map(({ ch, bb, bb_line, i, n }) => ({ ch, bb: Rect2.from_json(bb), bb_line: Rect2.from_json(bb_line), i, n })),
-            bb: Rect2.from_json(word.bb),
-        }))
+
+    static from_json(json: FloorJSON) {
+        return new Floor(
+            json.building,
+            json.floor,
+            json.raw.map(Path.from_json),
+            json.words.map(word => ({
+                str: word.str.map(({ ch, bb, bb_line, i, n }) => ({ ch, bb: Rect2.from_json(bb), bb_line: Rect2.from_json(bb_line), i, n })),
+                bb: Rect2.from_json(word.bb),
+            })),
+            Mesh2.from_json(json.mesh),
+            new FloorLayout(
+                [],
+                json.rooms.map(v => new Room(v.info, v.path, v.path_negatives))
+            )
+        )
     }
 }
 export interface FloorJSON {

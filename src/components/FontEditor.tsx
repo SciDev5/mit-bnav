@@ -6,6 +6,7 @@ import { Path } from "@/sys/structural/Path";
 import { DoorMatcher, DoorPattern, doorpattern_from_json, DoorPatternJSON } from "@/sys/pattern_matching/Door";
 import { Vec2 } from "@/sys/structural/Vec2";
 import { Rect2 } from "@/sys/structural/Rect2";
+import { CopyPasteJSON } from "./CopyPasteJSON";
 
 const LOCALSTORAGE_IDS = {
     FONT: "_bnav_font",
@@ -99,6 +100,17 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
             }}
             tabIndex={0}
         >
+            <CopyPasteJSON
+                name="font"
+                value={() => font_json}
+                set_value={set_font_json}
+                check={(json): json is FontJSON => (
+                    (!(json instanceof Array) && typeof json === "object")
+                    && ("map" in json)
+                    && Object.values(json.map).every(v => (typeof v === "object" && (v instanceof Object) && !(v instanceof Array)) && (("info" in v) && ("variants" in v)))
+                )}
+            />
+
             <input checked={view_mode} onChange={e => set_view_mode(e.currentTarget.checked)} type="checkbox" />
             <PathSelectionInput {...{ sel_i, sel_n, set_sel_i, set_sel_n, paths }} />
             <button onClick={add_symbol}>add symbol</button>
