@@ -1,0 +1,34 @@
+.path_default.selectable {
+    --color: #fff;
+    stroke-width: 2;
+}
+
+.path_default.unselectable {
+    --color: #f54;
+    stroke-width: 2;
+}
+
+.path_default:hover {
+    --color: #2df;
+    stroke-width: 4;
+}
+
+.path_default.selected {
+    --color: #3f7;
+    stroke-width: 4;
+}
+
+
+.path_annot {
+    --color: none;
+    fill: #f003;
+    stroke: #f54d;
+}
+
+.path_simple {
+    --color: #fff;
+}
+
+.path_simple:hover {
+    --color: #cef;
+}

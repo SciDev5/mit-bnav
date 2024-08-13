@@ -2,9 +2,9 @@
 
 import Image from "next/image";
 import styles from "./page.module.css";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Path } from "@/sys/structural/Path";
-import { Font, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
+import { Font, FontMatchedWord, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
 import { PathViewer, usePathSelectionOnKeyDown } from "@/components/PathViewer";
 import { FloorImporter } from "@/components/FloorImporter";
 import { DoorPatternEditor, FontEditor, useDoorMatcher, useDoorPatterns, useDoorPatternsJSON, useFont, useFontJSON } from "@/components/FontEditor";
@@ -12,11 +12,13 @@ import { Mesh2 } from "@/sys/structural/Mesh2";
 import { Rect2 } from "@/sys/structural/Rect2";
 import { Vec2 } from "@/sys/structural/Vec2";
 import { FloorEditor } from "@/components/FloorEditor";
+import { FloorLayout } from "@/sys/floor";
 
 
 export default function Home() {
     const [paths, set_paths] = useState<Path[]>([])
     const [loading_paths, set_loading_paths] = useState<Path[] | null>(null)
+    const [words_match, set_words_match] = useState<FontMatchedWord[]>([])
     const [q, set_q] = useState<Path[]>([])
     const [mesh, set_mesh] = useState<Mesh2>(Mesh2.from_paths([]))
     const [p_m, set_p_m] = useState<Path[]>([])
@@ -34,6 +36,9 @@ export default function Home() {
     const [doorpatterns_json] = useDoorPatternsJSON()
     const door_matcher = useDoorMatcher(doorpatterns_json)
 
+    const floor = useMemo(() => new FloorLayout(mesh.points, [], []), [mesh])
+    const mark_floor_changed = useCallback(() => { }, [])
+
     useEffect(() => {
         const pr = paths.map(v => v.bounding_box()).reduce((a, b) => a.dim.mag_sq() > b.dim.mag_sq() ? a : b, new Rect2(new Vec2(0, 0), new Vec2(0, 0)))
         const paths_ = paths.filter(v => v.bounding_box().intersects(pr) && v.bounding_box().dim.mag_sq() < pr.dim.mag_sq())
@@ -41,6 +46,7 @@ export default function Home() {
 
         const l = font.find_symbols(paths_, 0.1)
         const w = font.wordify(l, 0.1)
+        set_words_match(w)
         // const d = door_matcher.find_doors(paths, 0.1)
         // console.log(l, w);
         set_q(w.flatMap(({ str, bb }) => Path.parse_dstr(`m ${bb.pos.x} ${bb.pos.y} h ${bb.dim.x} v ${bb.dim.y} h -${bb.dim.x} z`, {}, "LETTER " + str.map(v => v.ch).join(""))))
@@ -83,12 +89,13 @@ export default function Home() {
     return (
         <div
             onKeyDown={e => {
+                if (e.target instanceof HTMLInputElement) return
                 switch (e.key) {
-                    case "Backspace":
-                        paths.splice(sel_i, sel_n)
-                        set_paths([...paths])
-                        set_sel_n(1)
-                        break
+                    // case "Backspace":
+                    //     paths.splice(sel_i, sel_n)
+                    //     set_paths([...paths])
+                    //     set_sel_n(1)
+                    //     break
                     default: path_selection_on_key_down(e)
                 }
             }}
@@ -124,7 +131,7 @@ export default function Home() {
                 </Suspense>
             ) : (
 
-                <FloorEditor mesh={mesh} />
+                <FloorEditor {...{ mesh, floor, mark_floor_changed, words_match }} />
                 // <PathViewer layers={[
                 //     {
                 //         key: "z",

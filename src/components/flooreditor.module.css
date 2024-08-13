@@ -1,0 +1,34 @@
+.path_zone {
+    --color: #fff1;
+    fill: var(--color);
+}
+
+.path_zone.unselectable {
+    fill: none;
+}
+
+.path_zone.selectable:hover {
+    --color: #fff3;
+}
+
+.path_zone.selected {
+    --color: #f7f5;
+}
+
+
+.path_room {
+    --color: #77f3;
+    fill: var(--color);
+}
+
+.path_room.unselectable {
+    stroke: none;
+}
+
+.path_room.selectable:hover {
+    --color: #7df5;
+}
+
+.path_room.selected {
+    --color: #7ff5;
+}

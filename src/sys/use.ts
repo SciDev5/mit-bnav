@@ -11,3 +11,8 @@ export function useLocalhost<T>(localstorage_id: string, default_value: T) {
     }, [set_value_internal, localstorage_id])
     return [value, set_font] satisfies [any, any]
 }
+
+export function useUpdator(): () => void {
+    const [, set] = useState(Symbol(""))
+    return useCallback(() => set(Symbol()), [set])
+}

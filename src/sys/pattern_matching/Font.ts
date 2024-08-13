@@ -11,6 +11,7 @@ export enum RequireNearbyLevel {
 export type FontSymbolWordInfo = { needs_others_nearby: number }
 export type FontMatchedSymbol = { ch: string, bb: Rect2, bb_line: Rect2, i: number, n: number }
 export type FontMatchedSymbolRotated = FontMatchedSymbol & { restorative_rot: Vec2 }
+export type FontMatchedWord = { str: FontMatchedSymbol[], bb: Rect2 }
 
 export class Font {
     readonly map: Map<Path[], { ch: string, h_rel: number, y_off: number }>
@@ -98,9 +99,9 @@ export class Font {
         return letters
     }
 
-    wordify(letters_in: FontMatchedSymbol[], thresh: number = 0.01): { str: FontMatchedSymbol[], bb: Rect2 }[] {
+    wordify(letters_in: FontMatchedSymbol[], thresh: number = 0.01): FontMatchedWord[] {
         const letters = letters_in.map(l => l).sort((a, b) => a.bb.x - b.bb.x)
-        const words: { str: FontMatchedSymbol[], bb: Rect2 }[] = []
+        const words: FontMatchedWord[] = []
 
         for (let i = 0; i < letters.length; i++) {
             const word = { str: [letters[i]], bb: letters[i].bb_line }

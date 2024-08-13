@@ -382,6 +382,7 @@ export class Path {
     stringify(scale: number): string {
         return "M " +
             this.points
+                .filter(v => v != null)
                 .map(({ x, y }) => `${x * scale} ${y * scale}`)
                 .join(" L ") +
             (this.loop ? " z" : "")

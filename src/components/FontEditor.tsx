@@ -1,7 +1,7 @@
 import { Font, FontJSON, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
 import { useLocalhost } from "@/sys/use";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PathSelectionInput, PathViewer, PathViewerSimple, usePathSelectionOnKeyDown, usePathSelectionState } from "./PathViewer";
+import { PATH_CLASSES, PathSelectionInput, PathViewer, PathViewerSimple, usePathSelectionOnKeyDown, usePathSelectionState } from "./PathViewer";
 import { Path } from "@/sys/structural/Path";
 import { DoorMatcher, DoorPattern, doorpattern_from_json, DoorPatternJSON } from "@/sys/pattern_matching/Door";
 import { Vec2 } from "@/sys/structural/Vec2";
@@ -137,7 +137,7 @@ export function FontEditor({ paths, font_json, set_font_json }: { paths: Path[],
                     {
                         paths: words_highlight,
                         key: "words",
-                        path_class: "LETTER",
+                        path_class: PATH_CLASSES.ANNOT,
                     },
                     view_mode ? {
                         paths: paths_text_negative,

@@ -54,10 +54,10 @@ a {
   }
 }
 
-path:hover {
+/* path:hover {
   stroke: aqua;
   stroke-width: 4;
-}
+} */
 
 path.LETTER {
   fill: #f005;

@@ -2,29 +2,127 @@ import { Vec2 } from "./structural/Vec2"
 
 export class Floor {
     constructor(
+        public building: string,
+        public floor: number,
+        readonly layout: FloorLayout,
+    ) { }
+}
+
+export interface FloorLayoutEditState {
+    readonly doors: Door[],
+    readonly rooms: Room[],
+}
+
+export class FloorLayout {
+    constructor(
         readonly points: Vec2[],
         readonly doors: Door[],
         readonly rooms: Room[],
     ) {
+    }
+
+
+    export_state(): FloorLayoutEditState {
+        return {
+            doors: this.doors.map(v => v.copy()),
+            rooms: this.rooms.map(v => v.copy(true)),
+        }
+    }
+    revert_state(state: FloorLayoutEditState) {
+        this.doors.splice(0, this.doors.length, ...state.doors)
+        this.rooms.splice(0, this.rooms.length, ...state.rooms)
     }
 }
 
 export class Door {
     constructor(
         readonly path: number[],
-        readonly rooms: [number, number],
+    ) { }
+
+    copy() {
+        return new Door([...this.path])
+    }
+}
+
+export enum RoomType {
+    Hallway,
+    DiningHall,
+    Kitchen,
+    Lounge,
+    Lobby,
+    CommonArea,
+    Bathroom,
+    Sleep,
+    Gym,
+    Workshop,
+    Other,
+}
+export type RoomSpec = {
+    type: RoomType.Hallway
+    | RoomType.DiningHall
+    | RoomType.Kitchen
+    | RoomType.Lounge
+    | RoomType.Lobby
+    | RoomType.CommonArea
+    | RoomType.Gym
+    | RoomType.Workshop
+    | RoomType.Other
+} | {
+    type: RoomType.Sleep,
+    capacity: number,
+} | {
+    type: RoomType.Bathroom,
+    gendered?: "M" | "W",
+}
+
+export function roomspec_str(spec: RoomSpec) {
+    switch (spec.type) {
+        case RoomType.Hallway: return "hallway"
+        case RoomType.DiningHall: return "dining"
+        case RoomType.Kitchen: return "kitchen"
+        case RoomType.Lounge: return "lounge"
+        case RoomType.Lobby: return "lobby"
+        case RoomType.CommonArea: return "common"
+        case RoomType.Bathroom: return "bathroom" + spec.gendered ? `[${spec.gendered}]` : ""
+        case RoomType.Sleep: return `sleep[${spec.capacity}]`
+        case RoomType.Gym: return "gym"
+        case RoomType.Workshop: return "workshop"
+        case RoomType.Other: return "etc."
+    }
+}
+
+export function roomtype_str(type: RoomType) {
+    return {
+        [RoomType.Hallway]: "hallway",
+        [RoomType.DiningHall]: "dining hall",
+        [RoomType.Kitchen]: "Kitchen",
+        [RoomType.Lounge]: "lounge",
+        [RoomType.Lobby]: "lobby",
+        [RoomType.CommonArea]: "common area",
+        [RoomType.Bathroom]: "bathroom",
+        [RoomType.Sleep]: "sleep",
+        [RoomType.Gym]: "gym",
+        [RoomType.Workshop]: "workshop",
+        [RoomType.Other]: "other",
+    }[type]
+}
+
+export class RoomInfo {
+    constructor(
+        public id: string,
+        public type: RoomType,
+        public nickname: string | null,
     ) { }
 }
 
 export class Room {
     constructor(
+        readonly info: RoomInfo,
         readonly path: number[],
         readonly path_negatives: number[][],
-        readonly doors: Door[]
     ) {
         this.fix()
     }
-
 
     fix() {
         for (let i = this.path.length - 2; i >= 0; i--) {
@@ -47,8 +145,17 @@ export class Room {
         }
     }
 
-    copy() {
-        return new Room([...this.path], this.path_negatives.map(v => [...v]), [...this.doors])
+    copy(keep_info_intact = false) {
+        return new Room(
+            keep_info_intact ? this.info : new RoomInfo(
+                this.info.id,
+                this.info.type,
+                //  { ...this.info.spec },
+                this.info.nickname,
+            ),
+            [...this.path],
+            this.path_negatives.map(v => [...v]),
+        )
     }
 
     join(other: Room): boolean {

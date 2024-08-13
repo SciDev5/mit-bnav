@@ -1,193 +1,376 @@
-import { Font, FontJSON, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
-import { useLocalhost } from "@/sys/use";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { PathSelectionInput, PathSelectionInputSingle, PathViewer, PathViewerSimple, usePathSelectionOnKeyDown, usePathSelectionState } from "./PathViewer";
+import { Font, FontJSON, FontMatchedWord, RequireNearbyLevel } from "@/sys/pattern_matching/Font";
+import { useLocalhost, useUpdator } from "@/sys/use";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { PATH_CLASSES, PathClass, PathSelectionInput, PathSelectionInputSingle, PathViewer, PathViewerSimple, usePathSelectionOnKeyDown, usePathSelectionState } from "./PathViewer";
 import { Path } from "@/sys/structural/Path";
 import { DoorMatcher, DoorPattern, doorpattern_from_json, DoorPatternJSON } from "@/sys/pattern_matching/Door";
 import { Vec2 } from "@/sys/structural/Vec2";
 import { Rect2 } from "@/sys/structural/Rect2";
 import { Mesh2 } from "@/sys/structural/Mesh2";
 import { decode_u24_pair } from "@/sys/math";
-import { Floor, Room } from "@/sys/floor";
+import { Door, FloorLayout, FloorLayoutEditState, Room, RoomInfo, RoomSpec, roomspec_str, RoomType, roomtype_str } from "@/sys/floor";
+
+import styles from "./flooreditor.module.css"
+
+const PATH_CLASS_ZONE: PathClass = {
+    styles,
+    base: styles.path_zone
+}
+const PATH_CLASS_ROOM: PathClass = {
+    styles,
+    base: styles.path_room
+}
+
+export function RoomInfoEditor({
+    floor,
+    room,
+    words_match,
+    rerender_outer,
+}: {
+    floor: FloorLayout,
+    room: Room,
+    words_match: FontMatchedWord[],
+    rerender_outer: () => void,
+}) {
+    const room_info = room.info
+    const rerender = useUpdator()
+
+    return (<div>
+        <button
+            onClick={() => {
+                const bb = Rect2.from_points(...room.path.map(i => floor.points[i]))
+                const bb_center = bb.pos.plus(bb.dim.times_scalar(0.5))
+                const guess_id = words_match
+                    .map(v => {
+                        if (!v.bb.intersects(bb)) return null
+                        const text = v.str.map(v => v.ch).join("")
+                        if (!/^\d\d+[a-z]*$/.test(text)) return null
+                        return {
+                            data: { v, text },
+                            dist: v.bb.pos.plus(v.bb.dim.times_scalar(0.5)).dist_sq(bb_center)
+                        }
+                    })
+                    .filter(v => v != null)
+                    .reduce((a, b) => a.dist < b.dist ? a : b, { data: null as { v: FontMatchedWord, text: string } | null, dist: Infinity })
+                    .data
+                if (guess_id == null) return
+
+                room_info.id = guess_id.text
+                const idbb_center = guess_id.v.bb.pos.plus(guess_id.v.bb.dim.times_scalar(0.5))
 
 
-export function FloorEditor({ mesh }: { mesh: Mesh2 }) {
+                const guess_type_str = words_match
+                    .map(v => {
+                        if (v === guess_id.v) return null
+                        // if (v.bb.y > guess_id.v.bb.y_max) return null
+                        return { v, dist: v.bb.pos.plus(v.bb.dim.times_scalar(0.5)).dist_sq(idbb_center) }
+                    })
+                    .filter(v => v != null)
+                    .reduce((a, b) => a.dist < b.dist ? a : b, { v: null as FontMatchedWord | null, dist: Infinity })
+                    .v?.str.map(v => v.ch).join("")
+                console.log("gts", guess_type_str);
+
+                const guess_type: RoomType = {
+                    "": room_info.type,
+                    bath: RoomType.Bathroom,
+                    corr: RoomType.Hallway,
+                    foodsv: RoomType.Kitchen,
+                    food: RoomType.DiningHall,
+                    lounge: RoomType.Lounge,
+                    lobby: RoomType.Lobby,
+                    sleep: RoomType.Sleep,
+                }[guess_type_str?.replaceAll(/0/g, "o") ?? ""] ?? RoomType.Other
+                // const guess_type: RoomSpec = {
+                //     "": room_info.spec,
+                //     bath: { type: RoomType.Bathroom as const },
+                //     corr: { type: RoomType.Hallway as const },
+                //     foodsv: { type: RoomType.Kitchen as const },
+                //     food: { type: RoomType.DiningHall as const },
+                //     lounge: { type: RoomType.Lounge as const },
+                //     lobby: { type: RoomType.Lobby as const },
+                //     sleep: { type: RoomType.Sleep as const, capacity: 1 },
+                // }[guess_type_str?.replaceAll(/0/g, "o") ?? ""] ?? { type: RoomType.Other }
+
+                room_info.type = guess_type
+
+                rerender()
+                rerender_outer()
+            }}
+        >
+            guess
+        </button>
+        id <input
+            value={room_info.id}
+            onChange={useCallback((e: ChangeEvent<HTMLInputElement>) => {
+                room_info.id = e.currentTarget.value
+                rerender()
+                rerender_outer()
+            }, [rerender, room_info])}
+        />
+
+        <span>{roomtype_str(room_info.type)}</span>
+
+        nickname <input
+            value={room_info.nickname ?? ""}
+            onChange={useCallback((e: ChangeEvent<HTMLInputElement>) => {
+                room_info.nickname = e.currentTarget.value
+                if (room_info.nickname.trim() === "") {
+                    room_info.nickname = null
+                }
+                rerender()
+                rerender_outer()
+            }, [rerender, room_info])}
+        />
+    </div>)
+
+}
+
+export function FloorEditor({
+    mesh,
+    floor,
+    words_match,
+    mark_floor_changed,
+}: {
+    mesh: Mesh2,
+    floor: FloorLayout,
+    words_match: FontMatchedWord[],
+    mark_floor_changed: () => void,
+}) {
     const [raw_regions, set_raw_regions] = useState<number[][]>([])
     const [mesh_paths, set_mesh_paths] = useState<Path[]>([])
     const [sel_i, set_sel_i] = usePathSelectionState(0)
-    const [esel_i, set_esel_i] = useState(0)
-    const [psel_i, set_psel_i] = useState(0)
-    // const [sel_i, sel_n, set_sel_i, set_sel_n, set_sel] = usePathSelectionState(0)
+    const [sel_j, set_sel_j] = useState<null | number>(null)
+    const [point_i0, set_point_i0] = useState(0)
+    const [point_i1, set_point_i1] = useState<null | number>(null)
     const path_selection_on_key_down = usePathSelectionOnKeyDown(mesh_paths, sel_i, set_sel_i)
 
-    const floor = useMemo(() => new Floor(mesh.points, [], []), [mesh])
-    const [_floor_update, set_floor_update] = useState(0)
-    const floor_update = useCallback(() => set_floor_update(Math.random()), [])
+    const rerender = useUpdator()
+    const direct_update_floor = useCallback(() => {
+        mark_floor_changed()
+        rerender()
+    }, [mark_floor_changed])
 
     const [show_rooms, set_show_rooms] = useState(false)
-    const [undo_action, set_undo_action] = useState<null | (() => void)>(null)
+    const undo_stack = useMemo<(FloorLayoutEditState | (() => void))[]>(() => [], [floor])
     const [flip_action, set_flip_action] = useState<null | (() => void)>(null)
 
-    const [cut_sel, set_cut_sel] = useState<null | number>(null)
-    const [split_sel, set_split_sel] = useState<null | number>(null)
-    const [join_sel, set_join_sel] = useState<null | number>(null)
+    const update = useCallback((
+        undo_state: FloorLayoutEditState | (() => void),
+        flip_action?: () => void,
+    ) => {
+        undo_stack.push(undo_state)
+        set_flip_action((() => flip_action) ?? null)
+        direct_update_floor()
+    }, [])
+    const undo = useCallback(() => {
+        const undo_state = undo_stack.pop()
+        if (undo_state == null) return
+        if (undo_state instanceof Function) {
+            undo_state()
+        } else {
+            floor.revert_state(undo_state)
+        }
+        direct_update_floor()
+    }, [])
+    const flip = useCallback(flip_action ? () => {
+        flip_action()
+        direct_update_floor()
+    } : () => { }, [flip_action])
 
     useEffect(() => {
         set_mesh_paths(mesh.to_paths())
         set_raw_regions(mesh.trace_interiors())
     }, [mesh])
 
-    const do_add_room = () => {
-        floor.rooms.push(new Room([...raw_regions[sel_i]], [], []))
-        floor_update()
-        set_undo_action(() => () => {
+    const do_add_room = useCallback((zone_i: number) => {
+        floor.rooms.push(new Room(
+            new RoomInfo("", RoomType.Other, null),
+            [...raw_regions[zone_i]],
+            [],
+        ))
+
+        const undo_state = () => { floor.rooms.length -= 1 }
+        update(undo_state)
+    }, [floor, update, raw_regions])
+    const do_join = useCallback((room_i0: number, room_i1: number) => {
+        const room0 = floor.rooms[room_i0]
+        const room1 = floor.rooms[room_i1]
+
+        const room0_before = room0.copy()
+        const room1_before = room1.copy()
+        if (room0.join(room1)) {
+            floor.rooms.splice(room_i1, 1)
+            set_sel_i(floor.rooms.indexOf(room0))
+            set_sel_j(null)
+            const undo_state = () => {
+                floor.rooms.splice(room_i1, 0, room1)
+                floor.rooms[room_i0] = room0_before
+            }
+            update(undo_state)
+        } else if (room1.join(room0)) {
+            floor.rooms.splice(room_i0, 1)
+            set_sel_i(floor.rooms.indexOf(room1))
+            set_sel_j(null)
+            const undo_state = () => {
+                floor.rooms.splice(room_i0, 0, room0)
+                floor.rooms[room_i1] = room1_before
+            }
+            update(undo_state)
+        } else {
+            alert("join failed")
+        }
+    }, [floor, update])
+    const do_split = useCallback((room: Room, point_i0: number, point_i1: number) => {
+        const cut_i = [point_i0, point_i1] satisfies [any, any]
+
+        const path_old = [...room.path]
+        const room_new = room.copy()
+        room.cut(...cut_i)
+        cut_i.reverse()
+        room_new.cut(...cut_i)
+        floor.rooms.push(room_new)
+        const undo_state = () => {
             floor.rooms.length -= 1
-        })
-    }
-    const do_join = () => {
-        if (join_sel != null) {
-            set_join_sel(null)
-            const [i0, i1] = [join_sel, sel_i]
-            const room0 = floor.rooms[i0]
-            const room1 = floor.rooms[i1]
-            if (room1 == null || i0 == i1) return
-
-            const room0_before = room0.copy()
-            const room1_before = room1.copy()
-            if (room0.join(room1)) {
-                floor.rooms.splice(i1, 1)
-                set_undo_action(() => () => {
-                    floor.rooms.splice(i1, 0, room1)
-                    floor.rooms[i0] = room0_before
-                })
-                floor_update()
-            } else if (room1.join(room0)) {
-                floor.rooms.splice(i0, 1)
-                set_undo_action(() => () => {
-                    floor.rooms.splice(i0, 0, room0)
-                    floor.rooms[i1] = room1_before
-                })
-                floor_update()
-            } else {
-                alert("join failed")
-            }
-        } else {
-            const room = floor.rooms[sel_i]
-            if (room == null) return
-            set_join_sel(sel_i)
+            room.path.splice(0, room.path.length, ...path_old)
         }
-    }
-    const do_split = () => {
-        if (split_sel != null) {
-            set_split_sel(null)
-            const room = floor.rooms[sel_i]
-            if (room == null) return
-            const i = psel_i
-            if (!room.path.includes(i)) return
+        update(undo_state)
+    }, [floor, update])
+    const do_cut = useCallback((room: Room, point_i0: number, point_i1: number) => {
+        const cut_i = [point_i0, point_i1] satisfies [any, any]
 
-            const cut_i = [split_sel, i] satisfies [any, any]
-
-            const path_old = [...room.path]
-            const room_new = room.copy()
-            room.cut(...cut_i)
+        const path_old = [...room.path]
+        room.cut(...cut_i)
+        const undo_state = () => {
+            room.path.splice(0, room.path.length, ...path_old)
+        }
+        const flip_action = () => {
+            undo_state()
             cut_i.reverse()
-            room_new.cut(...cut_i)
-            floor.rooms.push(room_new)
-            floor_update()
-            const undo = () => {
-                floor.rooms.length -= 1
-                room.path.splice(0, room.path.length, ...path_old)
-                floor_update()
-            }
-            set_undo_action(() => undo)
-        } else {
-            const room = floor.rooms[sel_i]
-            if (room == null) return
-            const i = psel_i
-            if (!room.path.includes(i)) return
-            set_split_sel(i)
-        }
-    }
-    const do_cut = () => {
-        if (cut_sel != null) {
-            set_cut_sel(null)
-            const room = floor.rooms[sel_i]
-            if (room == null) return
-            const i = psel_i
-            if (!room.path.includes(i)) return
-
-            const cut_i = [cut_sel, i] satisfies [any, any]
-
-            const path_old = [...room.path]
             room.cut(...cut_i)
-            floor_update()
-            const undo = () => {
-                room.path.splice(0, room.path.length, ...path_old)
-                floor_update()
-            }
-            const flip = () => {
-                undo()
-                cut_i.reverse()
-                room.cut(...cut_i)
-                floor_update()
-            }
-            set_undo_action(() => undo)
-            set_flip_action(() => flip)
-        } else {
-            const room = floor.rooms[sel_i]
-            if (room == null) return
-            const i = psel_i
-            if (!room.path.includes(i)) return
-            set_cut_sel(i)
+        }
+        update(undo_state, flip_action)
+    }, [update])
+    const do_delete = useCallback((room_i: number) => {
+        const room = floor.rooms[room_i]
+
+        floor.rooms.splice(room_i, 1)
+        const undo_state = () => {
+            floor.rooms.splice(room_i, 0, room)
+        }
+        update(undo_state)
+    }, [floor, update])
+
+    const set_sel_i_clear_j = useCallback((i: number) => {
+        set_sel_i(i)
+        set_sel_j(null)
+    }, [set_sel_i, set_sel_j])
+    const set_sel_j_move_i = useCallback((i: number) => {
+        if (i === sel_i) return
+        set_sel_i(i)
+        set_sel_j(sel_i)
+    }, [set_sel_i, set_sel_j, sel_i])
+    const l0 = {
+        paths: floor.rooms.map(v => new Path(v.path.map(i => floor.points[i] ?? new Vec2(0, 0)), true, false)),
+        sel: show_rooms ? {
+            sel_i,
+            sel_n: 1,
+            set_i: set_sel_i_clear_j,
+            shift_set_i: set_sel_j_move_i,
+        } : undefined,
+        path_class: PATH_CLASS_ROOM,
+        key: "zi",
+    }
+    const l1 = {
+        paths: (show_rooms ? raw_regions.slice(0, 1) : raw_regions).map(path => new Path(path.map(vi => mesh.points[vi]), true, false)),
+        key: "z",
+        path_class: PATH_CLASS_ZONE,
+        sel: show_rooms ? undefined : {
+            sel_i,
+            sel_n: 1,
+            set_i: set_sel_i,
         }
     }
-    const do_delete = () => {
-        const room = floor.rooms[sel_i]
-        if (room == null) return
+    const s0 = {
+        paths: useMemo(() => {
 
-        floor.rooms.splice(sel_i, 1)
-        floor_update()
-        set_undo_action(() => () => {
-            floor.rooms.splice(sel_i, 0, room)
-        })
+            const p0 = mesh.points[point_i0]
+            if (p0 == null) return []
+            const p1 = mesh.points[point_i1 ?? -1] ?? p0.plus(new Vec2(0.001, 0))
+            console.log(p0, p1);
+            const t = p1.minus(p0).normalized().times_scalar(5)
+            const n = t.cx_times(new Vec2(0, 1))
+
+            return [
+                new Path([
+                    p0,
+                    p1,
+                ], true, false),
+                new Path([
+                    p0.plus(n),
+                    p0.minus(t),
+                    p0.minus(n),
+                    p1.minus(n),
+                    p1.plus(t),
+                    p1.plus(n),
+                ], true, false),
+            ]
+        }, [point_i0, point_i1, mesh]),
+        key: "s",
+        path_class: PATH_CLASSES.ANNOT,
+    }
+    const s1 = {
+        paths: useMemo(() => {
+            const room = floor.rooms[sel_j ?? -1]
+            if (room == null) return []
+            return [
+                new Path(room.path.map(i => floor.points[i]), true, false)
+            ]
+        }, [floor, sel_j]),
+        key: "sj",
+        path_class: PATH_CLASSES.ANNOT,
     }
 
     return (
         <div
             onKeyDown={e => {
+                if (e.target instanceof HTMLInputElement) return
+
+                const room: Room | null = floor.rooms[sel_i] ?? null
+                const room_second: Room | null = floor.rooms[sel_j ?? -1] ?? null
                 switch (e.key) {
                     case "s":
                         set_show_rooms(!show_rooms)
                         break
                     case "a":
-                        if (!show_rooms) {
-                            do_add_room()
+                        if (!show_rooms && raw_regions[sel_i]) {
+                            do_add_room(sel_i)
                         }
                         break
                     case "e":
-                        if (show_rooms) {
-                            do_join()
+                        if (show_rooms && room != null && room_second != null) {
+                            do_join(sel_i, sel_j!)
                         }
                         break
                     case "q":
-                        if (show_rooms) {
-                            do_split()
+                        if (show_rooms && room != null && point_i0 != null && point_i1 != null && room.path.includes(point_i0) && room.path.includes(point_i1)) {
+                            do_split(room, point_i0, point_i1)
                         }
                         break
                     case "x":
-                        if (show_rooms) {
-                            do_delete()
+                        if (show_rooms && room != null) {
+                            do_delete(sel_i)
+                        }
+                        break
+                    case "c":
+                        if (show_rooms && room != null && point_i0 != null && point_i1 != null) {
+                            do_cut(room, point_i0, point_i1)
                         }
                         break
                     case "z":
-                        undo_action?.()
-                        set_undo_action(null)
+                        undo()
                         break
                     case "f":
-                        flip_action?.()
-                        break
-                    case "c":
-                        do_cut()
+                        flip()
                         break
                     default:
                         path_selection_on_key_down(e)
@@ -195,97 +378,39 @@ export function FloorEditor({ mesh }: { mesh: Mesh2 }) {
             }}
             tabIndex={0}
         >
-            {!show_rooms && <button onClick={() => {
-                floor.rooms.push(new Room([...raw_regions[sel_i]], [], []))
-                floor_update()
-            }}>
-                add_room
-            </button>}
-
-            <input checked={show_rooms} onChange={e => set_show_rooms(e.currentTarget.checked)} type="checkbox" />
-            <PathSelectionInputSingle {...{ sel_i, set_sel_i, paths: mesh_paths }} />
+            {show_rooms && (<>
+                {floor.rooms[sel_i] && <RoomInfoEditor floor={floor} words_match={words_match} room={floor.rooms[sel_i]} rerender_outer={rerender} />}
+            </>)}
             <PathViewer
                 on_click={(e, p) => {
                     if (!e.ctrlKey) return
-                    set_psel_i(mesh.closest_point(p))
-                    set_esel_i(mesh.closest_edge(p))
+                    const i = mesh.closest_point(p)
+                    if (e.shiftKey) {
+                        set_point_i1(i)
+                    } else {
+                        set_point_i0(i)
+                        set_point_i1(null)
+                    }
                 }}
                 layers={[
-                    // {
-                    //     paths: mesh_paths,
-                    //     key: "",
-                    // },
-                    {
-                        paths: floor.rooms.map(v => new Path(v.path.map(i => floor.points[i] ?? new Vec2(0, 0)), true, false)),
-                        sel: show_rooms ? {
-                            sel_i,
-                            sel_n: 1,
-                            set_i: set_sel_i,
-                        } : undefined,
-                        path_class: "INTR",
-                        key: "zi",
-                    },
-                    ...show_rooms ? [] : [
-                        {
-                            paths: raw_regions.map(path => new Path(path.map(vi => mesh.points[vi]), true, false)),
-                            key: "z",
-                            path_class: "INTR",
-                            sel: {
-                                sel_i,
-                                sel_n: 1,
-                                set_i: set_sel_i,
-                            }
-                        }
-                    ],
-                    {
-                        paths: useMemo(() => {
-                            const v = mesh.points[psel_i]
-                            if (v == null) return []
-                            const t = new Vec2(1, 0).times_scalar(5)
-                            const n = t.cx_times(new Vec2(0, 1))
+                    s0,
+                    ...show_rooms ? [l1, l0] : [l0, l1],
+                    s1,
+                ]}
+                text={floor.rooms.map(v => {
+                    const { id, type, nickname } = v.info
+                    const type_str = roomtype_str(type)
 
-                            return [
-                                new Path([
-                                    v,
-                                    v,
-                                ], false, false),
-                                new Path([
-                                    v.plus(n),
-                                    v.plus(t),
-                                    v.minus(n),
-                                    v.minus(t),
-                                ], true, false),
-                            ]
-                        }, [psel_i, mesh]),
-                        key: "s",
-                        path_class: "LETTER"
-                    },
-                    // {
-                    //     paths: useMemo(() => {
-                    //         const [v0, v1] = decode_u24_pair(esel_i).map(i => mesh.points[i])
-                    //         if (v0 == null || v1 == null) return []
-                    //         const t = v1.minus(v0).normalized().times_scalar(5)
-                    //         const n = t.cx_times(new Vec2(0, 1))
+                    if (id.length === 0) return null
 
-                    //         return [
-                    //             new Path([
-                    //                 v0,
-                    //                 v1,
-                    //             ], true, false),
-                    //             new Path([
-                    //                 v0.plus(n),
-                    //                 v0.minus(t),
-                    //                 v0.minus(n),
-                    //                 v1.minus(n),
-                    //                 v1.plus(t),
-                    //                 v1.plus(n),
-                    //             ], true, false),
-                    //         ]
-                    //     }, [esel_i, mesh]),
-                    //     key: "s",
-                    //     path_class: "LETTER"
-                    // },
-                ]} />
+                    const bb = Rect2.from_points(...v.path.map(i => floor.points[i]))
+
+                    return {
+                        text: id + "\n" + type_str + (nickname != null ? "\n\"" + nickname + "\"" : ""),
+                        pos: bb.pos.plus(bb.dim.times_scalar(0.5)),
+                    }
+                }).filter(v => v != null)}
+            />
         </div>
     )
 }
